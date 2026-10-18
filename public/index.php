@@ -78,8 +78,6 @@ define('SYSTEM_DIR', ROOT_DIR . $system_path . DIRECTORY_SEPARATOR);
 define('APP_DIR', ROOT_DIR . $application_folder . DIRECTORY_SEPARATOR);
 define('PUBLIC_DIR', $public_folder);
 
-define('PUBLIC_DIR', $public_folder);
-
 // ---- NEW: minimal .env loader ----
 if (!function_exists('env')) {
     function env($key, $default = '') {
@@ -98,9 +96,6 @@ if (is_readable($env_file)) {
         if (getenv($name) === false) putenv("$name=$value"); // real server vars win
     }
 }
-// ---- END NEW ----
-
-require_once SYSTEM_DIR . 'kernel/LavaLust.php';
 
 /*
  * ------------------------------------------------------

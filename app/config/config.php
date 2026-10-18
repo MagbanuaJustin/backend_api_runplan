@@ -106,7 +106,7 @@ $config['index_page']               = 'index.php';
 |
 */
 $config['log_threshold']            = 0;
-$config['log_dir']                  = 'runtime/logs/';
+$config['log_dir']   = ROOT_DIR . 'runtime/logs/';
 
 /*
 |--------------------------------------------------------------------------
@@ -261,7 +261,7 @@ $config['cookie_samesite']         = 'Strict';
 |
 |--------------------------------------------------------------------------
 */
-$config['cache_dir']               = 'runtime/cache/';
+$config['cache_dir'] = ROOT_DIR . 'runtime/cache/';
 $config['cache_default_expires']   = 0;
 
 /*
