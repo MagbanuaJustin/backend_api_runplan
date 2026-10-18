@@ -1,0 +1,5 @@
+.env
+.git
+runtime/*
+!runtime/.htaccess
+!runtime/index.html
