@@ -115,7 +115,7 @@ $config['refresh_token_table'] = 'refresh_tokens';
 | These are used for JWT Issuer and Audience claims.
 |
 */
-$config['jwt_issuer'] = 'your-app';
+$config['jwt_issuer'] = 'runplan-api';
 
 /*
 |--------------------------------------------------------------------------
@@ -125,7 +125,7 @@ $config['jwt_issuer'] = 'your-app';
 |
 */
 
-$config['jwt_audience'] = 'your-app-clients';
+$config['jwt_audience'] = 'runplan-web';
 
 /*
 |--------------------------------------------------------------------------

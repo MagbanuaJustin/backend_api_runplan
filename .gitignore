@@ -20,3 +20,8 @@ runtime/*
 
 # Secrets
 .env
+cookies.txt
+old.txt
+before.txt
+body.json
+curl

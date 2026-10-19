@@ -42,6 +42,15 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 |
 |
 */
-
 $router->get('/', 'Welcome::index');
 $router->get('/api/health', 'Health::index');
+$router->get('/migrate/run', 'Migrate::run');
+$router->get('/api/activities', 'Activities::index');
+$router->post('/api/auth/register', 'Auth::register');
+$router->post('/api/auth/login', 'Auth::login');
+$router->post('/api/auth/refresh', 'Auth::refresh');
+$router->get('/api/auth/me', 'Auth::me');
+$router->post('/api/auth/logout', 'Auth::logout');
+$router->post('/api/activities', 'Activities::store');
+$router->delete('/api/activities/{id}', 'Activities::destroy');
+$router->put('/api/activities/{id}', 'Activities::update');

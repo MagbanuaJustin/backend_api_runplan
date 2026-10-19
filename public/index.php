@@ -97,6 +97,20 @@ if (is_readable($env_file)) {
     }
 }
 
+// ---- Security headers (the API only returns JSON) ----
+header_remove('X-Powered-By');
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Referrer-Policy: no-referrer');
+if (env('APP_ENV', 'development') === 'production') {
+    // Not in development: LavaLust's debug error pages use inline styles
+    header("Content-Security-Policy: default-src 'none'; frame-ancestors 'none'");
+}
+if ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')) {
+    header('Strict-Transport-Security: max-age=31536000');
+}
+
 /*
  * ------------------------------------------------------
  * Setup done? Then Hurray!

@@ -16,7 +16,7 @@ class Create_users_table {
             return;
         }
 
-        $this->_lava->dbforge
+                $this->_lava->dbforge
             ->add_field([
                 'id' => [
                     'type'           => 'INT',
@@ -25,34 +25,27 @@ class Create_users_table {
                     'auto_increment' => TRUE,
                     'null'           => FALSE,
                 ],
-                'username' => [
-                    'type'       => 'VARCHAR',
-                    'constraint' => 100,
-                    'null'       => FALSE,
-                ],
                 'email' => [
                     'type'       => 'VARCHAR',
                     'constraint' => 255,
                     'null'       => FALSE,
-                    'unique'     => TRUE,
                 ],
-                'password' => [
+                'password_hash' => [
                     'type'       => 'VARCHAR',
                     'constraint' => 255,
-                    'null'       => FALSE,
+                    'null'       => TRUE,
                 ],
                 'role' => [
                     'type'       => 'ENUM',
-                    'constraint' => "'admin','moderator','user'",
+                    'constraint' => "'runner','admin'",
                     'null'       => FALSE,
-                    'default'    => 'user',
+                    'default'    => 'runner',
                 ],
-                'is_active' => [
-                    'type'       => 'TINYINT',
-                    'constraint' => 1,
-                    'unsigned'   => TRUE,
+                'status' => [
+                    'type'       => 'ENUM',
+                    'constraint' => "'active','suspended'",
                     'null'       => FALSE,
-                    'default'    => 1,
+                    'default'    => 'active',
                 ],
                 'created_at' => [
                     'type'    => 'DATETIME',
@@ -66,8 +59,7 @@ class Create_users_table {
                 ],
             ])
             ->add_key('id', primary: TRUE)
-            ->add_key('username', unique: TRUE, name: 'username_unique')
-            ->add_key('email', name: 'email_idx')
+            ->add_key('email', unique: TRUE, name: 'email_unique')
             ->add_key('role', name: 'role_idx')
             ->create_table('users');
     }

@@ -12,6 +12,11 @@ RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' \
     > /etc/apache2/conf-available/runplan.conf \
     && a2enconf runplan
 
+# Hide PHP and Apache version information
+RUN printf 'expose_php=Off\n' > /usr/local/etc/php/conf.d/hardening.ini \
+    && printf 'ServerTokens Prod\nServerSignature Off\n' > /etc/apache2/conf-available/hardening.conf \
+    && a2enconf hardening
+    
 COPY . /var/www/html
 RUN chown -R www-data:www-data /var/www/html/runtime
 

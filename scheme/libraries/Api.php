@@ -496,7 +496,7 @@ class Api
         $token = $this->get_bearer_token();
         $payload = $this->validate_jwt($token ?? '');
 
-        if (!$payload) {
+        if (!$payload || ($payload['type'] ?? '') === 'refresh') {
             $this->respond_error('Unauthorized', 401);
         }
 
@@ -528,6 +528,7 @@ class Api
             'sub'  => $user_id,
             'type' => 'refresh',
             'jti'  => bin2hex(random_bytes(16)),
+            'exp'  => $now + $this->refresh_token_expiration,
         ];
 
         $access_token  = $this->encode_jwt($access_payload);
