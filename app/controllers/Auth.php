@@ -112,7 +112,7 @@ class Auth extends Controller {
 
         $hashed = hash_hmac('sha256', $token, config_item('refresh_token_key'));
         $row = $this->db->raw(
-            'SELECT id FROM refresh_tokens WHERE token = ? AND expires_at > NOW() LIMIT 1',
+            'SELECT id FROM refresh_tokens WHERE token_hash = ? AND expires_at > NOW() LIMIT 1',
             [$hashed]
         )->fetch(PDO::FETCH_ASSOC);
 
