@@ -35,7 +35,10 @@ class Plans extends Controller {
         }
 
         $plan_id = $this->PlanModel->create_draft($user_id, $built['plan'], $built['sessions']);
-        $data = $this->PlanModel->find_for_user($user_id, $plan_id);
+                $data = $this->PlanModel->find_for_user($user_id, $plan_id);
+        if (!$data) {
+            $this->api->respond_error('The plan could not be saved. Please try again.', 500);
+        }
         $data['warnings'] = $built['warnings'];
 
         $this->api->respond(['data' => $data], 201);
