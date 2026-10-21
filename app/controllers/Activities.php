@@ -1,6 +1,11 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
+/**
+ * Controller: Plans
+ * 
+ * Automatically generated via CLI.
+ */
 class Activities extends Controller {
 
     public function index()
@@ -83,11 +88,29 @@ class Activities extends Controller {
         }
 
         [$clean, $errors] = $this->ActivityModel->validate($input);
+
+        $session_id = $input['session_id'] ?? null;
+        if ($session_id === null || $session_id === '') {
+            $session_id = null;
+        } else {
+            $session = $this->ActivityModel->linkable_session($user_id, $session_id);
+            if (!$session) {
+                $errors['session_id'] = 'Choose a session from your active plan.';
+            } elseif ($session['status'] === 'completed') {
+                $errors['session_id'] = 'That session already has a logged run.';
+            }
+        }
+
         if ($errors) {
             $this->api->respond(['error' => 'Validation failed', 'fields' => $errors], 422);
         }
 
-        $row = $this->ActivityModel->create_for_user($user_id, $clean);
+        $row = $this->ActivityModel->create_for_user($user_id, $clean, $session_id);
+        if ($row === null) {
+            $this->api->respond(['error' => 'Validation failed',
+                'fields' => ['session_id' => 'That session already has a logged run.']], 422);
+        }
+
         $this->api->respond(['data' => $row], 201);
     }
 }

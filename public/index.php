@@ -93,7 +93,7 @@ if (is_readable($env_file)) {
         list($name, $value) = explode('=', $line, 2);
         $name = trim($name);
         $value = trim(trim($value), "\"'");
-        if (getenv($name) === false) putenv("$name=$value"); // real server vars win
+        putenv("$name=$value"); // real server vars win
     }
 }
 

@@ -33,6 +33,7 @@ class ActivityModel extends Model {
         $row['id']               = (int) $row['id'];
         $row['distance_km']      = $km;
         $row['duration_seconds'] = $sec;
+        $row['session_id'] = $row['session_id'] !== null ? (int) $row['session_id'] : null;
 
         if ($km > 0) {
             $pace = (int) round($sec / $km);
@@ -121,22 +122,54 @@ class ActivityModel extends Model {
         return $row ? $this->with_pace($row) : null;
     }
 
-    public function create_for_user($user_id, array $clean)
+        // Returns the new activity, or null if the session was completed meanwhile
+    public function create_for_user($user_id, array $clean, $session_id = null)
     {
-        $this->db->table($this->table)->insert(array_merge($clean, [
-            'user_id' => (int) $user_id,   // from the token, never from the request
-            'source'  => 'manual',
-        ]));
+        $row = array_merge($clean, ['user_id' => (int) $user_id, 'source' => 'manual']);
+        if ($session_id !== null) {
+            $row['session_id'] = (int) $session_id;
+        }
 
-        return $this->find_for_user($user_id, $this->db->last_id());
+        $this->db->transaction();
+        $this->db->table($this->table)->insert($row);
+        $id = (int) $this->db->last_id();
+
+        if ($session_id !== null) {
+            $done = $this->db->raw(
+                "UPDATE training_sessions SET status = 'completed', updated_at = NOW()
+                  WHERE id = ? AND user_id = ? AND status <> 'completed'",
+                [(int) $session_id, (int) $user_id]
+            );
+            if ($done->rowCount() === 0) {
+                $this->db->roll_back();
+                return null;
+            }
+        }
+        $this->db->commit();
+
+        return $this->find_for_user($user_id, $id);
     }
 
     public function delete_for_user($user_id, $id)
     {
-        $this->db->table($this->table)
-            ->where('id', (int) $id)
-            ->where('user_id', (int) $user_id)
-            ->delete();
+        $found = $this->db->raw(
+            'SELECT session_id FROM activities WHERE id = ? AND user_id = ?',
+            [(int) $id, (int) $user_id]
+        )->fetch(PDO::FETCH_ASSOC);
+        if (!$found) {
+            return;
+        }
+
+        $this->db->transaction();
+        $this->db->raw('DELETE FROM activities WHERE id = ? AND user_id = ?', [(int) $id, (int) $user_id]);
+        if ($found['session_id'] !== null) {
+            $this->db->raw(
+                "UPDATE training_sessions SET status = 'planned', updated_at = NOW()
+                  WHERE id = ? AND user_id = ? AND status = 'completed'",
+                [(int) $found['session_id'], (int) $user_id]
+            );
+        }
+        $this->db->commit();
     }
 
     public function update_for_user($user_id, $id, array $clean)
@@ -152,6 +185,21 @@ class ActivityModel extends Model {
                 $clean['effort'], $clean['notes'], (int) $id, (int) $user_id,
             ]
         );
+    }
+
+    public function linkable_session($user_id, $session_id)
+    {
+        if (!ctype_digit((string) $session_id)) {
+            return null;
+        }
+        $row = $this->db->raw(
+            "SELECT s.id, s.status FROM training_sessions s
+               JOIN training_plans p ON p.id = s.plan_id
+              WHERE s.id = ? AND s.user_id = ? AND p.status = 'active' LIMIT 1",
+            [(int) $session_id, (int) $user_id]
+        )->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
     }
 }
 
