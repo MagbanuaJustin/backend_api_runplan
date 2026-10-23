@@ -20,6 +20,8 @@ require_once RP_ROOT . 'app/models/SessionModel.php';
 require_once RP_ROOT . 'app/models/AiCoachingModel.php';
 require_once RP_ROOT . 'app/libraries/HttpClient.php';
 require_once RP_ROOT . 'app/libraries/AnthropicService.php';
+require_once RP_ROOT . 'app/libraries/OpenWeatherService.php';
+require_once RP_ROOT . 'app/models/WeatherModel.php';
 
 /**
  * Tiny in-memory SQLite adapter matching the subset of LavaLust's Database API
@@ -142,6 +144,14 @@ class RpSqliteDb
                 provider_status TEXT NOT NULL DEFAULT 'ok',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (user_id, period_start)
+            );
+            CREATE TABLE weather_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                location_key TEXT NOT NULL,
+                forecast_date TEXT NOT NULL,
+                weather_payload TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                UNIQUE (location_key, forecast_date)
             );
             CREATE TABLE activities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -823,4 +833,210 @@ test('phase4: profile location is validated, saved, and never wiped by an older 
     assert_same(null, $cleared['location']['label']);
     assert_same(false, $cleared['location']['has_coordinates']);
     assert_same('', $cleared['location']['query'], 'nothing to query when no location is set');
+});
+
+// ---------------------------------------------------------------------
+// Phase 4 step 2 - OpenWeatherMap advisory forecast + cache
+// ---------------------------------------------------------------------
+
+/** A 3-hourly /forecast reply: one hot day, then one wet day (UTC+8). */
+function rp_owm_forecast_payload()
+{
+    return array(
+        'city' => array('timezone' => 28800),   // UTC+8: 01:00 UTC is 09:00 local
+        'list' => array(
+            array(
+                'dt'      => strtotime('2026-10-23 01:00:00 UTC'),
+                'main'    => array('temp' => 30, 'feels_like' => 33.0, 'temp_min' => 29, 'temp_max' => 31),
+                'weather' => array(array('main' => 'Clear', 'description' => 'clear sky', 'icon' => '01d')),
+                'wind'    => array('speed' => 4.0),
+                'pop'     => 0.1,
+            ),
+            array(
+                'dt'      => strtotime('2026-10-23 04:00:00 UTC'),
+                'main'    => array('temp' => 33, 'feels_like' => 40.2, 'temp_min' => 32, 'temp_max' => 34),
+                'weather' => array(array('main' => 'Clear', 'description' => 'clear sky', 'icon' => '01d')),
+                'wind'    => array('speed' => 5.0),
+                'pop'     => 0.2,
+            ),
+            array(
+                'dt'      => strtotime('2026-10-24 01:00:00 UTC'),
+                'main'    => array('temp' => 27, 'feels_like' => 30.0, 'temp_min' => 26, 'temp_max' => 28),
+                'weather' => array(array('main' => 'Rain', 'description' => 'light rain', 'icon' => '10d')),
+                'wind'    => array('speed' => 9.0),
+                'rain'    => array('3h' => 6.2),
+                'pop'     => 0.85,
+            ),
+            array(
+                'dt'      => strtotime('2026-10-24 04:00:00 UTC'),
+                'main'    => array('temp' => 26, 'feels_like' => 29.0, 'temp_min' => 25, 'temp_max' => 27),
+                'weather' => array(array('main' => 'Rain', 'description' => 'moderate rain', 'icon' => '10d')),
+                'wind'    => array('speed' => 7.0),
+                'rain'    => array('3h' => 3.1),
+                'pop'     => 0.9,
+            ),
+        ),
+    );
+}
+
+function rp_owm_service(array $overrides = array())
+{
+    return new OpenWeatherService(array_merge(array(
+        'enabled'       => true,
+        'api_key'       => 'owm-test-key',
+        'product'       => 'forecast16',
+        'forecast_days' => 5,
+        'cache_minutes' => 60,
+        'timeout'       => 5,
+    ), $overrides));
+}
+
+test('phase4: OpenWeatherService folds 3-hourly data into one advisory row per local day', function () {
+    $service = rp_owm_service();
+    assert_true($service->is_ready());
+    assert_same(5, $service->horizon_days());
+
+    HttpClient::fake(array(
+        array('ok' => true, 'status' => 200, 'body' => json_encode(rp_owm_forecast_payload())),
+    ));
+    $res = $service->daily_forecast(13.2233, 120.5956);
+    HttpClient::stop_faking();
+
+    assert_true($res['ok'], 'a 200 forecast must be usable');
+    assert_count(2, $res['days'], 'two local days, not four 3-hour slots');
+
+    $hot = $res['days'][0];
+    assert_same('2026-10-23', $hot['date'], 'local date uses the city offset, not UTC');
+    assert_same(29.0, $hot['temp_min_c']);
+    assert_same(34.0, $hot['temp_max_c']);
+    assert_same(18.0, $hot['wind_max_kmh'], 'wind is converted m/s -> km/h');
+    assert_same(20, $hot['rain_probability']);
+    assert_same('clear', $hot['condition']);
+
+    $hot_kinds = array_column($hot['advisories'], 'kind');
+    assert_true(in_array('heat', $hot_kinds, true), 'feels-like 40 C must raise a heat note');
+    assert_same('warning', $hot['advisories'][0]['level'], 'worst note comes first');
+
+    $wet = $res['days'][1];
+    assert_same('2026-10-24', $wet['date']);
+    assert_same(9.3, $wet['rain_mm'], 'rain accumulates across the day');
+    assert_same(90, $wet['rain_probability']);
+    assert_same('rain', $wet['condition']);
+
+    $wet_kinds = array_column($wet['advisories'], 'kind');
+    assert_true(in_array('rain', $wet_kinds, true));
+    assert_true(in_array('wind', $wet_kinds, true), '32 km/h is worth a note');
+});
+
+test('phase4: OpenWeatherService degrades cleanly when unconfigured, unmatched, or offline', function () {
+    // 1. Kill switch off -> not_configured, and not a single request is made.
+    HttpClient::fake(array());
+    $off = new OpenWeatherService(array('enabled' => false, 'api_key' => ''));
+    assert_false($off->is_ready());
+    $res = $off->daily_forecast(13.2, 120.5);
+    assert_same('not_configured', $res['error_code']);
+    assert_same(0, count(HttpClient::recorded()), 'a disabled provider must not call out');
+    HttpClient::stop_faking();
+
+    // 2. A coordinate string is a location; no geocoding request needed.
+    HttpClient::fake(array());
+    $geo = rp_owm_service()->geocode('13.22330,120.59560');
+    assert_true($geo['ok']);
+    assert_same(13.2233, $geo['latitude']);
+    assert_same(0, count(HttpClient::recorded()));
+    HttpClient::stop_faking();
+
+    // 3. A typo is a no_match, not an exception.
+    HttpClient::fake(array(array('ok' => true, 'status' => 200, 'body' => '[]')));
+    $geo = rp_owm_service()->geocode('Xyzzyville');
+    assert_same('no_match', $geo['error_code']);
+    HttpClient::stop_faking();
+
+    // 4. Provider down -> unavailable.
+    HttpClient::fake(array(array('ok' => false, 'status' => 503, 'body' => '{"cod":503}')));
+    $res = rp_owm_service()->daily_forecast(13.2, 120.5);
+    assert_false($res['ok']);
+    assert_same('unavailable', $res['error_code']);
+    HttpClient::stop_faking();
+});
+
+test('phase4: WeatherModel caches the forecast, remembers coordinates, and never touches the schedule', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    $db = rp_use_sqlite();
+    $weather = new WeatherModel();
+    $service = rp_owm_service();
+
+    // A runner who typed a city but never gave coordinates.
+    $db->raw(
+        "INSERT INTO runner_profiles (user_id, display_name, experience, goal, available_days, location_label)
+         VALUES (81, 'Weather Runner', 'intermediate', 'half_marathon', 'tue,thu,sun', 'Mamburao, PH')"
+    );
+    // A runner who never set a location at all.
+    $db->raw(
+        "INSERT INTO runner_profiles (user_id, display_name, experience, goal, available_days)
+         VALUES (82, 'No Location', 'beginner', '5k', 'mon,wed')"
+    );
+    $db->raw(
+        "INSERT INTO training_sessions (plan_id, user_id, scheduled_date, type, planned_distance_km, status)
+         VALUES (1, 81, '2026-10-24', 'long', 18, 'planned')"
+    );
+
+    HttpClient::fake(array(
+        array('ok' => true, 'status' => 200, 'body' => json_encode(array(
+            array('name' => 'Mamburao', 'lat' => 13.2233, 'lon' => 120.5956, 'country' => 'PH', 'state' => 'Mimaropa'),
+        ))),
+        array('ok' => true, 'status' => 200, 'body' => json_encode(rp_owm_forecast_payload())),
+    ));
+
+    $first = $weather->forecast_for_user(81, rp_today(), $service);
+    $after_first = count(HttpClient::recorded());
+
+    assert_same('ok', $first['status']);
+    assert_same(false, $first['cached']);
+    assert_same(2, $after_first, 'one geocode + one forecast call');
+    assert_same('Mamburao, Mimaropa, PH', $first['location']['label']);
+    assert_same(true, $first['location']['has_coordinates']);
+    assert_count(2, $first['days']);
+    assert_same(false, $first['mutates_schedule'], 'weather is advisory only');
+
+    // Coordinates are remembered so the next load only needs the forecast.
+    $stored = $db->raw('SELECT latitude, longitude FROM runner_profiles WHERE user_id = 81')->fetch(PDO::FETCH_ASSOC);
+    assert_same(13.2233, (float) $stored['latitude']);
+    assert_same(120.5956, (float) $stored['longitude']);
+
+    // Second load is served from weather_cache: zero extra requests.
+    $second = $weather->forecast_for_user(81, rp_today(), $service);
+    assert_same('ok', $second['status']);
+    assert_same(true, $second['cached']);
+    assert_same($after_first, count(HttpClient::recorded()), 'a cached forecast must not call the provider');
+
+    // The schedule is untouched by any of this.
+    $session = $db->raw('SELECT scheduled_date, status, planned_distance_km FROM training_sessions WHERE user_id = 81')->fetch(PDO::FETCH_ASSOC);
+    assert_same('2026-10-24', $session['scheduled_date']);
+    assert_same('planned', $session['status']);
+    assert_same(18.0, (float) $session['planned_distance_km']);
+
+    // Badge helper returns notes for the dates it is asked about.
+    $notes = $weather->advisories_for_dates(81, array('2026-10-24', '2026-11-30'), rp_today(), $service);
+    assert_count(1, $notes, 'only dates inside the horizon come back');
+    assert_contains('rain', strtolower(json_encode($notes['2026-10-24']['advisories'])));
+
+    // Provider down but we already have a forecast -> stale, not broken.
+    $db->raw("UPDATE weather_cache SET expires_at = '2000-01-01 00:00:00'");
+    HttpClient::fake(array(array('ok' => false, 'status' => 503, 'body' => '{"cod":503}')));
+    $stale = $weather->forecast_for_user(81, rp_today(), $service);
+    assert_same('stale_cache', $stale['status']);
+    assert_same(true, $stale['cached']);
+    assert_count(2, $stale['days'], 'the last known forecast is still served');
+
+    // No location -> nothing to look up, nothing requested.
+    HttpClient::fake(array());
+    $none = $weather->forecast_for_user(82, rp_today(), $service);
+    assert_same('no_location', $none['status']);
+    assert_count(0, $none['days']);
+    assert_same(0, count(HttpClient::recorded()));
+
+    HttpClient::stop_faking();
 });
