@@ -122,7 +122,7 @@ class ActivityModel extends Model {
         return $row ? $this->with_pace($row) : null;
     }
 
-        // Returns the new activity, or null if the session was completed meanwhile
+    // Returns the new activity, or null if the session was completed meanwhile
     public function create_for_user($user_id, array $clean, $session_id = null)
     {
         $row = array_merge($clean, ['user_id' => (int) $user_id, 'source' => 'manual']);

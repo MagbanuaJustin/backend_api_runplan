@@ -61,3 +61,5 @@ $router->get('/api/plans/current', 'Plans::current');
 $router->post('/api/plans/{id}/approve', 'Plans::approve');
 $router->patch('/api/sessions/{id}', 'Sessions::update');
 $router->get('/api/dashboard', 'Dashboard::index');
+$router->post('/api/plans/{id}/rebuild', 'Plans::rebuild');
+$router->get('/api/plans/{id}/revisions', 'Plans::revisions');

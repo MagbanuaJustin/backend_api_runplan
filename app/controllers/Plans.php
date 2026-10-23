@@ -75,4 +75,66 @@ class Plans extends Controller {
 
         $this->api->respond(['data' => $plan]);
     }
+
+    public function rebuild($id = '')
+    {
+        $this->call->library('api');
+        $this->call->database();
+        $this->call->model('ProfileModel');
+        $this->call->model('PlanModel');
+
+        $this->api->require_method('POST');
+        $payload = $this->api->require_jwt();
+        $user_id = (int) $payload['sub'];
+        $this->api->rate_limit('plan_rebuild_' . $user_id, 10, 3600);
+
+        if (!ctype_digit((string) $id)) {
+            $this->api->respond_error('Active plan not found.', 404);
+        }
+
+        $profile = $this->ProfileModel->find_for_user($user_id);
+        if (!$profile) {
+            $this->api->respond(['error' => 'Complete your profile first.',
+                'fields' => ['profile' => 'Save your profile before rebuilding your plan.']], 422);
+        }
+
+        // Longest run of the last 3 weeks: the rebuilt plan continues from what the runner really did
+        $row = $this->db->raw(
+            'SELECT MAX(distance_km) AS d FROM activities
+              WHERE user_id = ? AND activity_date >= DATE_SUB(UTC_DATE(), INTERVAL 21 DAY)',
+            [$user_id]
+        )->fetch(PDO::FETCH_ASSOC);
+        $recent = ($row && $row['d'] !== null) ? (float) $row['d'] : null;
+
+        $today = new DateTimeImmutable('today', new DateTimeZone('UTC'));
+        [$data, $err] = $this->PlanModel->rebuild_remaining($user_id, $id, $profile, $today, $recent);
+
+        if ($err === 'not_found') {
+            $this->api->respond_error('Active plan not found.', 404);
+        }
+        if ($err) {
+            $this->api->respond(['error' => 'Validation failed', 'fields' => $err], 422);
+        }
+        $this->api->respond(['data' => $data]);
+    }
+
+    public function revisions($id = '')
+    {
+        $this->call->library('api');
+        $this->call->database();
+        $this->call->model('PlanModel');
+
+        $this->api->require_method('GET');
+        $payload = $this->api->require_jwt();
+
+        $list = ctype_digit((string) $id)
+            ? $this->PlanModel->revisions_for_user((int) $payload['sub'], $id)
+            : null;
+        if ($list === null) {
+            $this->api->respond_error('Plan not found.', 404);
+        }
+
+        header('Cache-Control: no-store');
+        $this->api->respond(['data' => $list]);
+    }
 }

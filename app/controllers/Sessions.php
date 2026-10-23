@@ -1,11 +1,6 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
-/**
- * Controller: Sessions
- * 
- * Automatically generated via CLI.
- */
 class Sessions extends Controller {
 
     public function update($id = '')
@@ -28,6 +23,20 @@ class Sessions extends Controller {
             $this->api->respond_error('Invalid JSON body', 400);
         }
 
+        // Move to another day
+        if (array_key_exists('scheduled_date', $input)) {
+            [$session, $err] = $this->PlanModel->reschedule_session($user_id, $id, (string) $input['scheduled_date']);
+            if ($err) {
+                if ($err[0] === 422) {
+                    $this->api->respond(['error' => 'Validation failed',
+                        'fields' => ['scheduled_date' => $err[1]]], 422);
+                }
+                $this->api->respond_error($err[1], $err[0]);
+            }
+            $this->api->respond(['data' => $session]);
+        }
+
+        // Skip or un-skip
         $status = $input['status'] ?? null;
         if (!in_array($status, ['planned', 'skipped'], true)) {
             $this->api->respond(['error' => 'Validation failed',
