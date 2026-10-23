@@ -18,6 +18,7 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 $router->get('/', 'Welcome::index');
 $router->get('/api/health', 'Health::index');
 $router->options('/api/{a?}/{b?}/{c?}/{d?}', 'Health::preflight');
+$router->options('/api/{a?}/{b?}/{c?}/{d?}/{e?}', 'Health::preflight');
 $router->get('/migrate/run', 'Migrate::run');
 
 // Public auth endpoints (cookie/credentials bootstrap & password recovery)
@@ -49,6 +50,9 @@ $router->post('/api/plans/generate', 'Plans::generate')->middleware('auth');
 $router->get('/api/plans/current', 'Plans::current')->middleware('auth');
 $router->post('/api/plans/{id}/approve', 'Plans::approve')->middleware('auth');
 $router->post('/api/plans/{id}/rebuild', 'Plans::rebuild')->middleware('auth');
+$router->post('/api/plans/{id}/revisions/propose', 'Plans::propose_revision')->middleware('auth');
+$router->post('/api/plans/{id}/revisions/{rev_id}/apply', 'Plans::apply_revision')->middleware('auth');
+$router->post('/api/plans/{id}/revisions/{rev_id}/reject', 'Plans::reject_revision')->middleware('auth');
 $router->get('/api/plans/{id}/revisions', 'Plans::revisions')->middleware('auth');
 
 $router->patch('/api/sessions/{id}', 'Sessions::update')->middleware('auth');

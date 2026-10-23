@@ -13,6 +13,7 @@ require_once RP_ROOT . 'app/models/UserModel.php';
 require_once RP_ROOT . 'app/models/RefreshTokenModel.php';
 require_once RP_ROOT . 'app/models/PasswordResetModel.php';
 require_once RP_ROOT . 'app/models/SecurityEventModel.php';
+require_once RP_ROOT . 'app/models/ProfileModel.php';
 require_once RP_ROOT . 'app/models/ActivityModel.php';
 require_once RP_ROOT . 'app/models/DashboardModel.php';
 require_once RP_ROOT . 'app/models/SessionModel.php';
@@ -68,6 +69,7 @@ class RpSqliteDb
                 sessions_per_week INTEGER NOT NULL DEFAULT 3,
                 status TEXT NOT NULL DEFAULT 'active',
                 version INTEGER NOT NULL DEFAULT 1,
+                approved_at TEXT DEFAULT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
@@ -76,13 +78,45 @@ class RpSqliteDb
                 plan_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
                 scheduled_date TEXT NOT NULL,
+                planned_start_time TEXT DEFAULT NULL,
                 type TEXT NOT NULL,
                 planned_distance_km REAL,
                 planned_duration_seconds INTEGER,
                 status TEXT NOT NULL DEFAULT 'planned',
+                skip_reason TEXT DEFAULT NULL,
                 notes TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE runner_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                experience TEXT NOT NULL,
+                goal TEXT NOT NULL,
+                target_race_date TEXT DEFAULT NULL,
+                available_days TEXT NOT NULL,
+                desired_sessions_per_week INTEGER DEFAULT NULL,
+                preferred_time TEXT DEFAULT NULL,
+                baseline_distance_km REAL DEFAULT NULL,
+                baseline_pace INTEGER DEFAULT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE plan_revisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                plan_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                version INTEGER NOT NULL,
+                previous_version INTEGER DEFAULT NULL,
+                resulting_version INTEGER DEFAULT NULL,
+                decision TEXT NOT NULL DEFAULT 'applied',
+                change_summary TEXT NOT NULL,
+                reason TEXT DEFAULT NULL,
+                snapshot_json TEXT NOT NULL,
+                proposed_changes TEXT DEFAULT NULL,
+                decision_timestamp TEXT DEFAULT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE activities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -485,4 +519,106 @@ test('phase1: SecurityEventModel redacts secrets and UserModel::delete_account_a
     assert_same('Finished marathon block', $receipt['reason']);
     assert_same(hash('sha256', 'delete-me@example.com'), $receipt['email_sha256']);
 });
+
+// ---------------------------------------------------------------------
+// 6. Phase 2 scheduling preferences, skip_reason & propose/apply/reject
+// ---------------------------------------------------------------------
+test('phase2: desired_sessions_per_week, planned_start_time, and skip_reason persist cleanly', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    rp_use_sqlite();
+    $profiles = new ProfileModel();
+    $plans    = new PlanModel();
+
+    list($clean, $errs) = $profiles->validate(array(
+        'display_name'              => 'Runner Two',
+        'experience'                => 'intermediate',
+        'goal'                      => '10k',
+        'target_race_date'          => rp_race_in(70),
+        'available_days'            => array('mon', 'tue', 'thu', 'sat', 'sun'),
+        'desired_sessions_per_week' => 3,
+        'preferred_time'            => 'morning',
+        'baseline_distance_km'      => 6.0,
+        'baseline_pace'             => 360,
+    ));
+    assert_same(array(), $errs);
+    $profiles->save_for_user(15, $clean);
+
+    $saved_profile = $profiles->find_for_user(15);
+    assert_same(3, $saved_profile['desired_sessions_per_week']);
+
+    list($built, $build_errs) = $plans->build($saved_profile, rp_today());
+    assert_same(array(), $build_errs);
+    assert_same(3, $built['plan']['sessions_per_week'], 'desired_sessions_per_week caps 5 available days to 3');
+    assert_same('06:30:00', $built['sessions'][0]['planned_start_time'], 'morning maps to 06:30:00');
+
+    $plan_id  = $plans->create_draft(15, $built['plan'], $built['sessions']);
+    $approved = $plans->approve_for_user(15, $plan_id);
+    $first_id = $approved['sessions'][0]['id'];
+
+    $skipped = $plans->set_session_status(15, $first_id, 'skipped', 'Tight calf muscle');
+    assert_same('skipped', $skipped['status']);
+    assert_same('Tight calf muscle', $skipped['skip_reason']);
+
+    $restored = $plans->set_session_status(15, $first_id, 'planned');
+    assert_same('planned', $restored['status']);
+    assert_same(null, $restored['skip_reason']);
+});
+
+test('phase2: propose_rebuild leaves sessions untouched until apply_revision and supports reject_revision', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    $db    = rp_use_sqlite();
+    $plans = new PlanModel();
+
+    $profile = array(
+        'display_name'              => 'Runner Three',
+        'experience'                => 'intermediate',
+        'goal'                      => '10k',
+        'target_race_date'          => rp_race_in(70),
+        'available_days'            => array('tue', 'thu', 'sat'),
+        'desired_sessions_per_week' => 3,
+        'preferred_time'            => 'evening',
+        'baseline_distance_km'      => 5.0,
+        'baseline_pace'             => 360,
+    );
+
+    list($built) = $plans->build($profile, rp_today());
+    $plan_id     = $plans->create_draft(21, $built['plan'], $built['sessions']);
+    $approved    = $plans->approve_for_user(21, $plan_id);
+    $v_before    = $approved['plan']['version'];
+
+    // Mark first session completed — must survive any rebuild
+    $first_id = $approved['sessions'][0]['id'];
+    $db->raw("UPDATE training_sessions SET status = 'completed' WHERE id = ?", array($first_id));
+
+    // 1. Propose -> Reject: plan version and sessions do not change
+    list($prop1, $err1) = $plans->propose_rebuild(21, $plan_id, $profile, rp_today(), 9.0, 'Testing cancel');
+    assert_same(null, $err1);
+    assert_same('pending', $prop1['decision']);
+    assert_same(1, $prop1['preserved_completed']);
+
+    $rejected = $plans->reject_revision(21, $plan_id, $prop1['id']);
+    assert_same('rejected', $rejected['decision']);
+    assert_same($v_before, $plans->find_for_user(21, $plan_id)['plan']['version']);
+
+    // 2. Propose -> Apply: bumps version, preserves completed run, records applied decision
+    list($prop2, $err2) = $plans->propose_rebuild(21, $plan_id, $profile, rp_today(), 9.0, 'Bump volume after 9km run');
+    assert_same(null, $err2);
+
+    list($applied, $apply_err) = $plans->apply_revision(21, $plan_id, $prop2['id']);
+    assert_same(null, $apply_err);
+    assert_same($v_before + 1, $applied['plan']['version']);
+
+    $completed = array_values(array_filter($applied['sessions'], function ($s) {
+        return $s['status'] === 'completed';
+    }));
+    assert_count(1, $completed, 'completed session must be preserved across apply_revision');
+
+    $history = $plans->revisions_for_user(21, $plan_id);
+    assert_count(3, $history, 'approved + rejected + applied all appear in audit history');
+});
+
 

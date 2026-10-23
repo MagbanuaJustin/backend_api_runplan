@@ -3,8 +3,9 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Model: ProfileModel
- * 
- * Automatically generated via CLI.
+ *
+ * Runner training profile, goal validation, available training days, preferred
+ * workout time of day, and optional desired weekly run frequency.
  */
 class ProfileModel extends Model {
     protected $table = 'runner_profiles';
@@ -23,20 +24,24 @@ class ProfileModel extends Model {
 
     public function present(array $row)
     {
-        $pace = $row['baseline_pace'] !== null ? (int) $row['baseline_pace'] : null;
-        $days = trim((string) $row['available_days']);
+        $pace    = $row['baseline_pace'] !== null ? (int) $row['baseline_pace'] : null;
+        $days    = trim((string) $row['available_days']);
+        $desired = isset($row['desired_sessions_per_week']) && $row['desired_sessions_per_week'] !== null
+            ? (int) $row['desired_sessions_per_week']
+            : null;
 
         return [
-            'id'                   => (int) $row['id'],
-            'display_name'         => $row['display_name'],
-            'experience'           => $row['experience'],
-            'goal'                 => $row['goal'],
-            'target_race_date'     => $row['target_race_date'],
-            'available_days'       => $days === '' ? [] : explode(',', $days),
-            'preferred_time'       => $row['preferred_time'],
-            'baseline_distance_km' => $row['baseline_distance_km'] !== null ? (float) $row['baseline_distance_km'] : null,
-            'baseline_pace'        => $pace,
-            'baseline_pace_label'  => $pace ? sprintf('%d:%02d', intdiv($pace, 60), $pace % 60) : null,
+            'id'                        => (int) $row['id'],
+            'display_name'              => $row['display_name'],
+            'experience'                => $row['experience'],
+            'goal'                      => $row['goal'],
+            'target_race_date'          => $row['target_race_date'],
+            'available_days'            => $days === '' ? [] : explode(',', $days),
+            'desired_sessions_per_week' => $desired,
+            'preferred_time'            => $row['preferred_time'],
+            'baseline_distance_km'      => $row['baseline_distance_km'] !== null ? (float) $row['baseline_distance_km'] : null,
+            'baseline_pace'             => $pace,
+            'baseline_pace_label'       => $pace ? sprintf('%d:%02d', intdiv($pace, 60), $pace % 60) : null,
         ];
     }
 
@@ -89,6 +94,7 @@ class ProfileModel extends Model {
             }
         }
 
+        $valid_days = [];
         $days = $in['available_days'] ?? null;
         if (!is_array($days)) {
             $errors['available_days'] = 'Choose the days you can train.';
@@ -99,8 +105,20 @@ class ProfileModel extends Model {
             } elseif (count($days) < 2) {
                 $errors['available_days'] = 'Choose at least 2 days.';
             } else {
-                $clean['available_days'] = implode(',', array_values(array_intersect(self::DAYS, $days)));
+                $valid_days = array_values(array_intersect(self::DAYS, $days));
+                $clean['available_days'] = implode(',', $valid_days);
             }
+        }
+
+        $desired = $in['desired_sessions_per_week'] ?? null;
+        if ($desired === null || $desired === '') {
+            $clean['desired_sessions_per_week'] = null;
+        } elseif (filter_var($desired, FILTER_VALIDATE_INT, ['options' => ['min_range' => 2, 'max_range' => 6]]) === false) {
+            $errors['desired_sessions_per_week'] = 'Choose between 2 and 6 sessions per week.';
+        } elseif (!empty($valid_days) && (int) $desired > count($valid_days)) {
+            $errors['desired_sessions_per_week'] = 'Desired sessions per week cannot exceed your selected available days.';
+        } else {
+            $clean['desired_sessions_per_week'] = (int) $desired;
         }
 
         $time = $in['preferred_time'] ?? null;
@@ -143,26 +161,50 @@ class ProfileModel extends Model {
 
     public function save_for_user($user_id, array $c)
     {
-        $this->db->raw(
-            'INSERT INTO runner_profiles
-                (user_id, display_name, experience, goal, target_race_date,
-                 available_days, preferred_time, baseline_distance_km, baseline_pace)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) AS incoming
-             ON DUPLICATE KEY UPDATE
-                display_name = incoming.display_name,
-                experience = incoming.experience,
-                goal = incoming.goal,
-                target_race_date = incoming.target_race_date,
-                available_days = incoming.available_days,
-                preferred_time = incoming.preferred_time,
-                baseline_distance_km = incoming.baseline_distance_km,
-                baseline_pace = incoming.baseline_pace,
-                updated_at = NOW()',
-            [
-                (int) $user_id, $c['display_name'], $c['experience'], $c['goal'],
-                $c['target_race_date'], $c['available_days'], $c['preferred_time'],
-                $c['baseline_distance_km'], $c['baseline_pace'],
-            ]
-        );
+        $uid      = (int) $user_id;
+        $existing = $this->db->table($this->table)->where('user_id', $uid)->get();
+
+        if ($existing) {
+            $this->db->raw(
+                'UPDATE runner_profiles
+                    SET display_name = ?,
+                        experience = ?,
+                        goal = ?,
+                        target_race_date = ?,
+                        available_days = ?,
+                        desired_sessions_per_week = ?,
+                        preferred_time = ?,
+                        baseline_distance_km = ?,
+                        baseline_pace = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                  WHERE user_id = ?',
+                [
+                    $c['display_name'],
+                    $c['experience'],
+                    $c['goal'],
+                    $c['target_race_date'],
+                    $c['available_days'],
+                    $c['desired_sessions_per_week'] ?? null,
+                    $c['preferred_time'],
+                    $c['baseline_distance_km'],
+                    $c['baseline_pace'],
+                    $uid,
+                ]
+            );
+            return;
+        }
+
+        $this->db->table($this->table)->insert([
+            'user_id'                   => $uid,
+            'display_name'              => $c['display_name'],
+            'experience'                => $c['experience'],
+            'goal'                      => $c['goal'],
+            'target_race_date'          => $c['target_race_date'],
+            'available_days'            => $c['available_days'],
+            'desired_sessions_per_week' => $c['desired_sessions_per_week'] ?? null,
+            'preferred_time'            => $c['preferred_time'],
+            'baseline_distance_km'      => $c['baseline_distance_km'],
+            'baseline_pace'             => $c['baseline_pace'],
+        ]);
     }
 }
