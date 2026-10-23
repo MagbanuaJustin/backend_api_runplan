@@ -31,7 +31,9 @@ REST API for **RunPlan AI: Adaptive Marathon Training Planner**, built on **Lava
 
 2. **Run database migrations (first-time setup):**
    - Temporarily set `MIGRATION_ENABLED=true` in `.env`
-   - Visit `http://127.0.0.1:3000/migrate/run` (or run `php public/index.php migrate/run`)
+   - From the project root run: `php public/index.php migrate/run`
+     (CLI only on purpose - `Migrate` returns 404 to a browser, so visiting
+     `/migrate/run` will not work)
    - Set `MIGRATION_ENABLED=false` again when finished
 
 3. **Start the API server on port `3000` (matching Vite's `/api` proxy):**
