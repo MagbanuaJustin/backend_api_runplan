@@ -77,6 +77,27 @@ class Plans extends Controller {
         $this->api->respond(['data' => $plan]);
     }
 
+    public function discard($id = '')
+    {
+        $this->call->library('api');
+        $this->call->database();
+        $this->call->model('PlanModel');
+
+        if (!in_array($_SERVER['REQUEST_METHOD'] ?? '', ['DELETE', 'POST'], true)) {
+            $this->api->respond_error('Method not allowed', 405);
+        }
+        $payload = $this->api->require_jwt();
+        $user_id = (int) $payload['sub'];
+        $this->api->rate_limit('plan_discard_' . $user_id, 30, 600);
+
+        $ok = ctype_digit((string) $id) ? $this->PlanModel->discard_draft_for_user($user_id, $id) : false;
+        if (!$ok) {
+            $this->api->respond_error('Draft plan not found.', 404);
+        }
+
+        $this->api->respond(['data' => ['discarded' => true]]);
+    }
+
     public function propose_revision($id = '')
     {
         $this->call->library('api');

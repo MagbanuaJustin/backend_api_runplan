@@ -619,6 +619,14 @@ test('phase2: propose_rebuild leaves sessions untouched until apply_revision and
 
     $history = $plans->revisions_for_user(21, $plan_id);
     assert_count(3, $history, 'approved + rejected + applied all appear in audit history');
+
+    // 3. New draft can be discarded without touching the active plan
+    $draft2_id = $plans->create_draft(21, $built['plan'], $built['sessions']);
+    assert_false($plans->discard_draft_for_user(21, $plan_id), 'active plan must never be deleted by discard_draft_for_user');
+    assert_true($plans->discard_draft_for_user(21, $draft2_id), 'draft plan discards cleanly');
+    $current = $plans->current_for_user(21);
+    assert_same(null, $current['draft']);
+    assert_same($plan_id, $current['active']['plan']['id']);
 });
 
 

@@ -158,6 +158,29 @@ export default function Plan() {
     }
   }
 
+  async function discardDraft() {
+    const draftId = plans.draft?.plan?.id
+    if (!draftId) return
+    setBusy(true)
+    setError(null)
+    setNotice('')
+    try {
+      await apiPost(`/plans/${draftId}/discard`)
+      const hadActive = Boolean(plans.active)
+      setPlans((p) => ({ ...p, draft: null }))
+      setWarnings([])
+      setNotice(
+        hadActive
+          ? 'Draft schedule cancelled. Your active training plan is unchanged.'
+          : 'Draft schedule cancelled.',
+      )
+    } catch (err) {
+      setError({ message: err.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handlePropose(e) {
     e.preventDefault()
     const planId = plans.active?.plan?.id
@@ -285,6 +308,9 @@ export default function Plan() {
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={generate}>
               Regenerate draft
             </button>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={discardDraft}>
+              Cancel draft
+            </button>
           </div>
         </section>
       )}
@@ -362,7 +388,7 @@ export default function Plan() {
         <section className="plan-card" aria-labelledby="active-title">
           <div className="panel-head">
             <h2 id="active-title">Active training plan</h2>
-            <span className="pill pill-ok">&checkmark; Active &middot; v{active.plan.version ?? 1}</span>
+            <span className="pill pill-ok">{'\u2713'} Active &middot; v{active.plan.version ?? 1}</span>
           </div>
 
           <PlanSummary data={active} />

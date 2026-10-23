@@ -332,6 +332,30 @@ class PlanModel extends Model {
         return $this->find_for_user($user_id, $plan_id);
     }
 
+    public function discard_draft_for_user($user_id, $plan_id)
+    {
+        $uid = (int) $user_id;
+        $pid = (int) $plan_id;
+
+        $draft = $this->db->raw(
+            "SELECT id FROM training_plans WHERE id = ? AND user_id = ? AND status = 'draft' LIMIT 1",
+            [$pid, $uid]
+        )->fetch(PDO::FETCH_ASSOC);
+        if (!$draft) {
+            return false;
+        }
+
+        $this->db->transaction();
+        $this->db->raw('DELETE FROM training_sessions WHERE plan_id = ? AND user_id = ?', [$pid, $uid]);
+        $this->db->raw(
+            "DELETE FROM training_plans WHERE id = ? AND user_id = ? AND status = 'draft'",
+            [$pid, $uid]
+        );
+        $this->db->commit();
+
+        return true;
+    }
+
     public function mark_missed_for_user($user_id, ?DateTimeImmutable $today = null)
     {
         $ref    = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));

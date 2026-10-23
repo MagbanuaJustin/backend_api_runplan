@@ -327,7 +327,7 @@ export default function Dashboard() {
             </>
           ) : !next ? (
             <>
-              <span className="pill pill-ok">&checkmark; Schedule complete</span>
+              <span className="pill pill-ok">{'\u2713'} Schedule complete</span>
               <p style={{ marginTop: 12 }}>
                 Every scheduled session in your current plan has passed or been logged.
               </p>
