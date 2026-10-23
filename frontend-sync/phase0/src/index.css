@@ -1,0 +1,729 @@
+:root {
+    --bg: #ffffff;
+    --text: #111111;
+    --text-muted: #666666;
+    --surface: #f4f4f5;
+    --border: #d4d4d8;
+    --accent: #ff6a00;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0d0d0d;
+        --text: #f2f2f2;
+        --text-muted: #9a9a9a;
+        --surface: #1a1a1a;
+        --border: #333333;
+    }
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, sans-serif;
+}
+
+.shell {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 48px 20px 88px;
+}
+
+small {
+    color: var(--text-muted);
+}
+
+/* run cards */
+.runs {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+}
+
+.card {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+}
+
+/* bottom tab bar */
+.tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+}
+
+.tabbar a {
+    flex: 1;
+    text-align: center;
+    padding: 14px 4px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-top: 3px solid transparent;
+}
+
+.tabbar a[aria-current="page"] {
+    color: var(--text);
+    font-weight: 700;
+    border-top-color: var(--accent);
+}
+
+/* login form */
+.form {
+    display: grid;
+    gap: 8px;
+    margin: 16px 0;
+}
+
+.form input {
+    height: 44px;
+    padding: 0 12px;
+    font-size: 16px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+}
+
+.form button {
+    height: 48px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #111;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+:root {
+    --danger: #b91c1c;
+    --link: #b45309;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --danger: #f87171;
+        --link: #ff9a52;
+    }
+}
+
+.error {
+    color: var(--danger);
+    margin: 4px 0;
+}
+
+.topbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 12px;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 12px 20px 0;
+}
+
+.topbar button {
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    background: var(--surface);
+    color: var(--text);
+    border: 1.5px solid var(--border);
+}
+
+.form button:disabled {
+    opacity: 0.6;
+}
+
+.dialog {
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    width: min(92vw, 360px);
+}
+
+.dialog::backdrop {
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.dialog-body {
+    padding: 20px;
+}
+
+.dialog-body h2 {
+    margin: 0 0 8px;
+    font-size: 18px;
+}
+
+.dialog-body p {
+    margin: 0 0 20px;
+    color: var(--text-muted);
+}
+
+.dialog-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.dialog-actions button {
+    height: 44px;
+    padding: 0 18px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.btn-secondary {
+    background: var(--surface);
+    color: var(--text);
+    border: 1.5px solid var(--border);
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: #111;
+    border: 0;
+}
+
+.dialog-actions button:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.field {
+    display: grid;
+    gap: 4px;
+}
+
+.form textarea {
+    padding: 10px 12px;
+    font-size: 16px;
+    font-family: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    resize: vertical;
+}
+
+.form input[aria-invalid="true"],
+.form textarea[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+
+.btn-danger {
+    background: var(--danger);
+    color: var(--bg);
+    border: 0;
+}
+
+.card-action {
+    margin-left: auto;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text);
+    background: transparent;
+    border: 1.5px solid var(--border);
+}
+
+.card-edit {
+    display: block;
+}
+
+.card-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+}
+
+.card-actions .card-action {
+    margin-left: 0;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.form-actions button {
+    flex: 1;
+}
+
+.form .btn-secondary {
+    background: var(--surface);
+    color: var(--text);
+    border: 1.5px solid var(--border);
+}
+.form select {
+    height: 44px;
+    padding: 0 12px;
+    font-size: 16px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+}
+
+.form select[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+
+.fieldset {
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 0;
+}
+
+.fieldset legend {
+    padding: 0 6px;
+    font-size: 14px;
+}
+
+.days {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.day {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    cursor: pointer;
+}
+
+.day input {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    accent-color: var(--accent);
+}
+
+.success {
+    padding: 10px 12px;
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    background: var(--surface);
+    margin: 4px 0;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+.note {
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.btn {
+    height: 48px;
+    padding: 0 18px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.btn-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+.plan-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    padding: 14px;
+    margin: 16px 0;
+}
+
+.plan-card h2 {
+    margin: 0 0 10px;
+    font-size: 18px;
+}
+
+.badge {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1.5px solid var(--border);
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+    margin: 0 0 10px;
+}
+
+.stats dt {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.stats dd {
+    margin: 2px 0 0;
+    font-weight: 600;
+}
+
+.weeks summary {
+    cursor: pointer;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+}
+
+.table-wrap {
+    overflow-x: auto;
+}
+
+.table-wrap table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.table-wrap th,
+.table-wrap td {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.warnings {
+    margin: 10px 0;
+    padding-left: 20px;
+}
+
+a,
+a:visited {
+    color: var(--link);
+    text-underline-offset: 3px;
+}
+
+a:hover {
+    text-decoration-thickness: 2px;
+}
+
+.weeks summary {
+    list-style: none;
+}
+
+.weeks summary::-webkit-details-marker {
+    display: none;
+}
+
+.weeks summary::before {
+    content: '\25B8';
+    display: inline-block;
+    margin-right: 8px;
+}
+
+.weeks[open] summary::before {
+    content: '\25BE';
+}
+
+.cal-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.cal-nav h2 {
+    flex: 1;
+    margin: 0;
+    font-size: 18px;
+    text-align: center;
+}
+
+.cal-btn {
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 8px;
+    font-size: 20px;
+    cursor: pointer;
+    background: var(--surface);
+    color: var(--text);
+    border: 1.5px solid var(--border);
+}
+
+.cal-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.cal-today {
+    font-size: 14px;
+    padding: 0 12px;
+}
+
+.cal-head,
+.cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+}
+
+.cal-head span {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 4px 0;
+}
+
+.day {
+    min-height: 56px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 4px 5px;
+    font: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.day.empty {
+    background: transparent;
+    border-color: transparent;
+    cursor: default;
+}
+
+.day-num {
+    font-size: 13px;
+}
+
+.day.today .day-num {
+    font-weight: 700;
+    text-decoration: underline;
+}
+
+.day-chip {
+    margin-top: auto;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.day[aria-pressed="true"] {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.status-planned .day-chip {
+    border-bottom: 2px solid var(--accent);
+}
+
+.status-skipped .day-chip {
+    text-decoration: line-through;
+    color: var(--text-muted);
+}
+
+.status-missed .day-chip {
+    color: var(--danger);
+}
+
+.status-completed .day-chip {
+    font-weight: 800;
+}
+
+a.btn {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+}
+
+a.btn-primary,
+a.btn-primary:visited {
+    color: #111;
+}
+
+a.btn-secondary,
+a.btn-secondary:visited {
+    color: var(--text);
+}
+.bars {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0 0;
+    display: grid;
+    gap: 8px;
+}
+
+.bar-row {
+    display: grid;
+    grid-template-columns: 84px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.bar-track {
+    position: relative;
+    height: 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+}
+
+.bar-actual {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    background: var(--accent);
+    border-radius: 6px;
+}
+
+.bar-planned {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    width: 3px;
+    background: var(--text);
+    border-radius: 2px;
+}
+
+.bar-value {
+    white-space: nowrap;
+    color: var(--text-muted);
+}
+
+.topbar-email {
+    margin-right: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.topbar-link,
+.topbar-link:visited {
+    display: inline-flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    text-decoration: none;
+    color: var(--text);
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+}
+
+.topbar-link[aria-current="page"] {
+    border-color: var(--accent);
+    font-weight: 700;
+}
+
+.filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px;
+    padding: 12px;
+    margin: 10px 0 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.filter-bar .field {
+    flex: 1 1 150px;
+    font-size: 13px;
+}
+
+.filter-bar input {
+    height: 40px;
+    padding: 0 10px;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+}
+
+.filter-clear {
+    margin-left: 0;
+    height: 40px;
+    min-height: 40px;
+}
+
+.card-note {
+    flex-basis: 100%;
+    padding-top: 4px;
+    border-top: 1px dashed var(--border);
+}
+
+.inline-reschedule {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    display: grid;
+    gap: 8px;
+}
+
+.inline-reschedule input {
+    height: 44px;
+    padding: 0 12px;
+    font-size: 16px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+}
+
+.table-wrap td.wrap-cell,
+.table-wrap th.wrap-cell {
+    white-space: normal;
+}
