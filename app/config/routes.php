@@ -60,5 +60,8 @@ $router->get('/api/plans/{id}/revisions', 'Plans::revisions')->middleware('auth'
 $router->patch('/api/sessions/{id}', 'Sessions::update')->middleware('auth');
 $router->get('/api/dashboard', 'Dashboard::index')->middleware('auth');
 
+$router->get('/api/ai/feedback', 'AiCoaching::show')->middleware('auth');
+$router->post('/api/ai/feedback', 'AiCoaching::generate')->middleware('auth');
+
 $router->get('/api/integrations', 'Integrations::status')->middleware('auth');
 $router->get('/api/integrations/status', 'Integrations::status')->middleware('auth');

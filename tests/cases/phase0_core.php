@@ -17,7 +17,9 @@ require_once RP_ROOT . 'app/models/ProfileModel.php';
 require_once RP_ROOT . 'app/models/ActivityModel.php';
 require_once RP_ROOT . 'app/models/DashboardModel.php';
 require_once RP_ROOT . 'app/models/SessionModel.php';
+require_once RP_ROOT . 'app/models/AiCoachingModel.php';
 require_once RP_ROOT . 'app/libraries/HttpClient.php';
+require_once RP_ROOT . 'app/libraries/AnthropicService.php';
 
 /**
  * Tiny in-memory SQLite adapter matching the subset of LavaLust's Database API
@@ -117,6 +119,26 @@ class RpSqliteDb
                 proposed_changes TEXT DEFAULT NULL,
                 decision_timestamp TEXT DEFAULT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE ai_plan_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                plan_id INTEGER DEFAULT NULL,
+                provider TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                request_summary TEXT DEFAULT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE ai_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                period_start TEXT NOT NULL,
+                period_end TEXT NOT NULL,
+                metrics_snapshot TEXT NOT NULL,
+                feedback_text TEXT DEFAULT NULL,
+                provider_status TEXT NOT NULL DEFAULT 'ok',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, period_start)
             );
             CREATE TABLE activities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -627,6 +649,87 @@ test('phase2: propose_rebuild leaves sessions untouched until apply_revision and
     $current = $plans->current_for_user(21);
     assert_same(null, $current['draft']);
     assert_same($plan_id, $current['active']['plan']['id']);
+});
+
+// ---------------------------------------------------------------------
+// 7. Phase 3 AnthropicService privacy boundary, monthly cap & fallback
+// ---------------------------------------------------------------------
+test('phase3: AnthropicService sends only manual non-PII metrics and stores Claude feedback', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    $db = rp_use_sqlite();
+    $coaching = new AiCoachingModel();
+
+    $db->raw(
+        "INSERT INTO runner_profiles (user_id, display_name, experience, goal, available_days)
+         VALUES (33, 'Secret Name', 'intermediate', 'half_marathon', 'tue,thu,sat')"
+    );
+    // Manual run (must be included) + non-manual run (must NEVER be sent to AI)
+    $db->raw(
+        "INSERT INTO activities (user_id, source, activity_date, distance_km, duration_seconds, effort)
+         VALUES (33, 'manual', '2026-10-21', 8.5, 2700, 6),
+                (33, 'strava', '2026-10-22', 99.0, 9999, 9)"
+    );
+
+    HttpClient::fake(array(
+        array(
+            'ok'     => true,
+            'status' => 200,
+            'body'   => json_encode(array(
+                'content' => array(
+                    array('type' => 'text', 'text' => 'Solid 8.5 km aerobic run this week. Keep easy pace relaxed.'),
+                ),
+            )),
+        ),
+    ));
+
+    $live_service = new AnthropicService(array(
+        'enabled'          => true,
+        'api_key'          => 'sk-ant-test-only-secret-key',
+        'model'            => 'claude-sonnet-4-5',
+        'monthly_call_cap' => 10,
+    ));
+
+    $saved = $coaching->generate_weekly_feedback(33, rp_today(), $live_service);
+    $recorded = HttpClient::recorded();
+    HttpClient::stop_faking();
+
+    assert_count(1, $recorded);
+    assert_false(strpos($recorded[0]['body'], 'Secret Name') !== false, 'runner display_name must never be sent');
+    assert_false(strpos($recorded[0]['body'], '99') !== false, 'non-manual strava distance must never be sent');
+    assert_contains('8.5', $recorded[0]['body'], 'manual distance must be included');
+    assert_same('ok', $saved['provider_status']);
+    assert_same('Solid 8.5 km aerobic run this week. Keep easy pace relaxed.', $saved['feedback_text']);
+});
+
+test('phase3: AiCoachingModel falls back cleanly when Anthropic is disabled, over cap, or offline', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    rp_use_sqlite();
+    $coaching = new AiCoachingModel();
+
+    // 1. Disabled / unconfigured -> deterministic coaching with not_configured
+    $off_service = new AnthropicService(array('enabled' => false, 'api_key' => ''));
+    $res1 = $coaching->generate_weekly_feedback(44, rp_today(), $off_service);
+    assert_same('not_configured', $res1['provider_status']);
+    assert_contains('No manual runs were logged', $res1['feedback_text']);
+
+    // 2. Network/HTTP 503 failure -> deterministic fallback without throwing
+    HttpClient::fake(array(
+        array('ok' => false, 'status' => 503, 'body' => '{"error":"overloaded"}'),
+    ));
+    $live_service = new AnthropicService(array(
+        'enabled'          => true,
+        'api_key'          => 'sk-ant-test-only',
+        'monthly_call_cap' => 5,
+    ));
+    $res2 = $coaching->generate_weekly_feedback(44, rp_today(), $live_service);
+    HttpClient::stop_faking();
+
+    assert_same('fallback', $res2['provider_status']);
+    assert_true(strlen((string) $res2['feedback_text']) > 20);
 });
 
 

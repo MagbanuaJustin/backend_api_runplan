@@ -84,6 +84,7 @@ export default function Plan() {
   const [plans, setPlans] = useState({ active: null, draft: null })
   const [revisions, setRevisions] = useState([])
   const [warnings, setWarnings] = useState([])
+  const [draftBrief, setDraftBrief] = useState(null)
   const [activeWarnings, setActiveWarnings] = useState([])
   const [notice, setNotice] = useState('')
   const [state, setState] = useState('loading')
@@ -130,6 +131,7 @@ export default function Plan() {
       }
       setPlans((p) => ({ ...p, draft: { plan: result.plan, sessions: result.sessions } }))
       setWarnings(result.warnings ?? [])
+      setDraftBrief(result.ai_brief ?? null)
     } catch (err) {
       setError({ message: err.message, fields: err.fields })
     } finally {
@@ -145,6 +147,7 @@ export default function Plan() {
       const body = await apiPost(`/plans/${plans.draft.plan.id}/approve`)
       setPlans({ active: body.data, draft: null })
       setWarnings([])
+      setDraftBrief(null)
       setActiveWarnings([])
       setProposing(false)
       setProposalReason('')
@@ -169,6 +172,7 @@ export default function Plan() {
       const hadActive = Boolean(plans.active)
       setPlans((p) => ({ ...p, draft: null }))
       setWarnings([])
+      setDraftBrief(null)
       setNotice(
         hadActive
           ? 'Draft schedule cancelled. Your active training plan is unchanged.'
@@ -290,6 +294,12 @@ export default function Plan() {
             <h2 id="draft-title">Proposed draft schedule</h2>
             <span className="pill pill-warn">Pending approval</span>
           </div>
+          {draftBrief?.text && (
+            <div className="advisory-banner" style={{ marginBottom: 14 }}>
+              <strong>{draftBrief.provider_status === 'ok' ? 'Claude AI coach:' : 'Coach overview:'}</strong>{' '}
+              {draftBrief.text}
+            </div>
+          )}
           <PlanSummary data={draft} />
           {warnings.length > 0 && (
             <ul className="warnings">

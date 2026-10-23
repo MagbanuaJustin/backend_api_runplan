@@ -15,6 +15,7 @@ class Plans extends Controller {
         $this->call->database();
         $this->call->model('ProfileModel');
         $this->call->model('PlanModel');
+        $this->call->model('AiCoachingModel');
 
         $this->api->require_method('POST');
         $payload = $this->api->require_jwt();
@@ -41,6 +42,7 @@ class Plans extends Controller {
             $this->api->respond_error('The plan could not be saved. Please try again.', 500);
         }
         $data['warnings'] = $built['warnings'];
+        $data['ai_brief'] = $this->AiCoachingModel->record_plan_generation($user_id, $plan_id, $profile, $built, $today);
 
         $this->api->respond(['data' => $data], 201);
     }

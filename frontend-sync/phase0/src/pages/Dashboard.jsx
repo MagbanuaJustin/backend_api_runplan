@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiGet } from '../api.js'
+import { apiGet, apiPost } from '../api.js'
 import { TYPE_LABELS, formatDate, formatDuration, formatLongDate, paceLabel } from '../format.js'
 
 const GOAL_LABELS = {
@@ -136,16 +136,36 @@ export default function Dashboard() {
   const [data, setData] = useState(null)
   const [state, setState] = useState('loading')
   const [chartTab, setChartTab] = useState('distance')
+  const [coaching, setCoaching] = useState({ feedback: null, anthropic: null })
+  const [coachBusy, setCoachBusy] = useState(false)
+  const [coachError, setCoachError] = useState('')
 
   useEffect(() => {
     const today = new Date().toLocaleDateString('en-CA')
-    apiGet(`/dashboard?today=${today}`)
-      .then((body) => {
-        setData(body.data)
+    Promise.all([
+      apiGet(`/dashboard?today=${today}`),
+      apiGet('/ai/feedback').catch(() => ({ data: { feedback: null, anthropic: null } })),
+    ])
+      .then(([dash, ai]) => {
+        setData(dash.data)
+        if (ai?.data) setCoaching(ai.data)
         setState('ready')
       })
       .catch(() => setState('error'))
   }, [])
+
+  async function refreshCoaching() {
+    setCoachBusy(true)
+    setCoachError('')
+    try {
+      const body = await apiPost('/ai/feedback')
+      setCoaching(body.data)
+    } catch (err) {
+      setCoachError(err.message)
+    } finally {
+      setCoachBusy(false)
+    }
+  }
 
   if (state === 'loading') return <p role="status">Loading dashboard...</p>
   if (state === 'error') return <p role="alert">Could not load your dashboard.</p>
@@ -158,6 +178,9 @@ export default function Dashboard() {
 
   const next = plan?.next_session
   const latestRun = recent?.[0]
+  const feedback = coaching?.feedback
+  const anthropicReady = Boolean(coaching?.anthropic?.ready)
+  const isLiveClaude = feedback?.provider_status === 'ok'
 
   return (
     <>
@@ -434,6 +457,56 @@ export default function Dashboard() {
           )}
         </section>
       </div>
+
+      {/* Phase 3: Weekly AI / Rule-Based Coaching Review */}
+      <section className="plan-card" aria-labelledby="coach-title" style={{ marginTop: 14 }}>
+        <div className="panel-head">
+          <h2 id="coach-title">Weekly coaching review</h2>
+          <span className={`pill ${isLiveClaude ? 'pill-ok' : anthropicReady ? '' : 'pill-muted'}`}>
+            {isLiveClaude
+              ? '\u2713 Claude AI'
+              : anthropicReady
+                ? 'Claude AI ready'
+                : 'Rule-based coach'}
+          </span>
+        </div>
+
+        {!feedback ? (
+          <p className="note">
+            Generate a 7-day conditioning review from your manual runs and active plan adherence.
+            {!anthropicReady && ' (Anthropic API key is currently off in .env, so RunPlan will use its built-in rule-based coach.)'}
+          </p>
+        ) : (
+          <>
+            <p className="mono" style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--text-muted)' }}>
+              Window: {formatDate(feedback.period_start)} &ndash; {formatDate(feedback.period_end)}
+              {feedback.provider_status === 'cap_reached' ? ' · Monthly AI cap reached (rule-based fallback)' : ''}
+              {feedback.provider_status === 'fallback' ? ' · AI unreachable (rule-based fallback)' : ''}
+            </p>
+            <p style={{ margin: '0 0 12px', whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+              {feedback.feedback_text}
+            </p>
+          </>
+        )}
+
+        {coachError && <p className="error" role="alert">{coachError}</p>}
+
+        <div className="btn-row">
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={coachBusy}
+            onClick={refreshCoaching}
+          >
+            {coachBusy
+              ? 'Analyzing week...'
+              : feedback
+                ? 'Refresh weekly review'
+                : 'Generate weekly review'}
+          </button>
+          <Link className="btn btn-secondary" to="/status">Provider status</Link>
+        </div>
+      </section>
     </>
   )
 }
