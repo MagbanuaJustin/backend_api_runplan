@@ -61,63 +61,49 @@ junk files are now untracked.
 
 ---
 
-## 3. Build order
+## 3. Build order (Core-First, External Integrations Deferred to Stage B)
 
 Each phase is independently shippable and leaves the app working. `A`=API repo, `F`=frontend repo.
 
-### Phase 0 — Foundations & safety net *(start here)*
-- A: `app/libraries/HttpClient.php` — thin cURL wrapper: timeouts, JSON in/out, typed errors, **no** new composer deps.
-- A: `app/config/integrations.php` — all provider config from `env()`, each with a `configured` flag; `GET /api/integrations/status` reports which are live. Core must keep working when every flag is off (spec §7.3, NFR-04).
-- A: `.env.example` for real (currently only `MIGRATION_ENABLED`) + README run instructions.
-- A: `composer.json` + PHPUnit + a `php -l` lint script, and GitHub Actions (lint, static analysis, tests). **Nothing else is safe to build at volume until a machine can check it** — this sandbox has no PHP.
-- A: layering fix — add `UserModel`, `SessionModel`, `PasswordResetModel`; remove all `$this->db->…` from `Auth.php`, `Plans.php`. Raw SQL stays raw (it is correctly parameterised); the sin is layering, not injection.
-- A: `auth` middleware (D11).
+### Stage A — Core First-Party Backend + React Frontend (No External Integrations)
 
-### Phase 1 — Account completion: Google sign-in, reCAPTCHA, recovery, deletion *(FR-01)*
-- Migration `012` (new columns + `password_reset_tokens` + `deletion_requests`).
-- `app/libraries/GoogleIdentity.php` — JWKS fetch+cache, ES256 verify of the `credential` JWT, issuer/audience/expiry/nonce checks, `user_identities` mapping, **no email-based auto-link** (§5.6, TC-12).
-- `app/libraries/Captcha.php` — reCAPTCHA verify endpoint, score/action check, "provider unavailable ⇒ do not treat as verified" (§5.7).
-- `Auth::google`, `forgotPassword`, `resetPassword`, `Account::delete`.
-- F: Google button, `ForgotPassword`/`ResetPassword` pages, reCAPTCHA on register+recovery, `/me` bootstrap, delete-account confirm.
+#### Phase 0 — Core Foundations & Safety Net ✅ *(Complete)*
+- A: `PlanModel::build()` race-date guard fix (`MIN_WEEKS` "too close" vs `MAX_WEEKS` "more than 30 weeks away"), untracked 8 shell-junk files, hardened `.gitignore`.
+- A: `app/libraries/HttpClient.php` — thin zero-dependency cURL wrapper ready for Stage B.
+- A: `app/config/integrations.php` + `app/helpers/integration_helper.php` + `GET /api/integrations/status` — all providers OFF by default (`core_enabled: true`), zero secrets exposed.
+- A: `.env.example` (`DB_NAME=runplandb`), `README.md`, `composer.json`, `scripts/check.sh`, `tests/run.php`, and `.github/workflows/ci.yml`.
+- A: MVC layering cleanup — `UserModel`, `RefreshTokenModel`, `SessionModel`, `ActivityModel::longest_recent_run_km()`, `?from=&to=` activity date filter, `GET /api/activities/{id}`, `source='manual'` boundary (`D9`), configurable `refresh_token_column` (`D10`), zero `$this->db->…` calls in any controller.
+- A: `AuthMiddleware` (`D11`) wired onto protected routes + `OPTIONS /api/*` CORS preflight (`Health::preflight`).
 
-### Phase 2 — Anthropic Claude *(FR-02, FR-03, Module 2)*
-- `app/libraries/Anthropic.php` — Messages API, `tool`/JSON-schema constrained output, bounded tokens, timeout, **never** sends anything but eligible first-party rows, records a row in `ai_plan_requests` for every attempt.
-- `PlanService::propose()` — Claude draft → **existing deterministic validator** (`build()` rules) → template fallback on any failure. AI output can never bypass the rules or auto-activate (TC-03).
-- `CoachService::feedback()` — compute metrics in PHP, send only the summary, validate the reply shape, store in `ai_feedback`; on failure return status not fabricated text (TC-14).
-- F: AI feedback panel with period + disclaimer, plan-provenance badge ("AI-drafted / template fallback").
+#### Phase 1 — Core First-Party Account Management *(Next — Guided Step-by-Step)*
+- A: Migration `012` (core tables/columns: `password_reset_tokens`, `account_deletion_requests`, `auth_security_events`, plus core plan/session/profile columns).
+- A: `PasswordResetModel`, `SecurityEventModel`, `Auth::forgot_password`, `Auth::reset_password`, and `Account` controller (`GET /api/account`, `POST /api/account/password`, `DELETE /api/account`).
+- F: `ForgotPassword.jsx`, `ResetPassword.jsx`, and `Account.jsx` (change password + delete account confirmation).
 
-### Phase 3 — Revision flow per spec *(FR-04, D1/D2)*
-- Proposal-then-apply as in D1, `decision`/`reason` recorded, revision list surfaced.
-- F: `RevisionPanel` — diff of affected sessions, accept/cancel, history.
-
-### Phase 4 — OpenWeatherMap + reminders *(Module 1/5, D3/D8)*
-- `Weather.php` — forecast product per §5.2 (horizon/quota checked first), cache in `weather_cache` with `expires_at`, "stale/unavailable" never invented.
-- `planned_start_time` from `preferred_time`; timezone resolution for display + reminders.
-- Reminder scheduler: `notification_jobs` rows created/updated on session create/reschedule (D8 makes a start time possible).
-- F: weather strip on Calendar/Log-Activity; `ComingSoon` → real Settings/Integrations screen.
-
-### Phase 5 — Google Calendar *(§5.3)*
-- OAuth code flow, tokens encrypted in `integration_accounts`, scopes minimal.
-- Idempotent create/update via `calendar_event_mappings.provider_event_id` — reschedule **updates** the mapped event (TC-07); sync failure marks pending, never rolls back the internal plan.
-
-### Phase 6 — Firebase Cloud Messaging *(§5.4)*
-- Service worker + VAPID/web-push key, `push_subscriptions` register/unregister, `revoked_at` hygiene, quiet hours, `notification_jobs` worker run by cron (must not depend on an open tab).
-- F: permission prompt *after* explaining purpose; in-app fallback when denied.
-
-### Phase 7 — Verification & docs *(§10)*
-- PHPUnit covering TC-01…TC-15 minus Strava, integration tests per provider with a fake HTTP transport (the reason Phase 0's client wrapper exists).
-- README: env matrix, migration/deploy steps, how to disable any integration (spec §11.3).
+#### Phase 2 — Core Plan Revisions, Rescheduling & Frontend Completion *(FR-04, D1/D2/D7/D8)*
+- A: `planned_start_time` from `preferred_time`, `desired_sessions_per_week`, `skip_reason`, and two-step revision workflow (`propose` preview → `apply` confirm / `reject` cancel) with full `decision` / `reason` history.
+- F: `Calendar.jsx` session date rescheduling + skip reason, `Plan.jsx` rebuild preview/confirm/cancel + revision history viewer, `ActivityList.jsx` date-range filter, `Profile.jsx` desired sessions/week.
 
 ---
 
-## 4. Decisions I need before Phase 1
+### Stage B — Deferred External Integrations *(After Stage A is Verified)*
 
-1. **reCAPTCHA product/version** — spec §5.7 and §12 leave this open. Enterprise reCAPTCHA (keyless, score-based) vs reCAPTCHA v2 checkbox. Changes the widget, the verify payload, and the failure UX.
-2. **Google Calendar OAuth** — the API is a headless JSON API with no browser session; do we do a real code flow with a redirect URI on the SPA origin, or paste-code for now?
-3. **FCM vs plain Web Push** — spec says FCM, but FCM's *legacy* web push path is being retired by Google; plain VAPID Web Push + a PHP sender needs no Firebase project. Which does your adviser's rubric expect?
-4. **Anthropic model + budget cap** — which model, max tokens, and monthly call ceiling for a school project on a personal key (spec §5.1 asks for it explicitly).
-5. **Is the React contract frozen?** I would add fields (`planned_start_time`, `location`, revision `decision`) — additive is safe, but tell me if another teammate owns those pages.
-6. **Do I edit `runplan_frontend` directly**, and may I push branches to it?
+#### Phase 3 — Google Identity Services + Google reCAPTCHA *(§5.6, §5.7)*
+- A/F: Google ID token verification (`user_identities`, explicit linking, no email auto-link) + reCAPTCHA verification on public forms.
 
-## 5. Environment notes (from your HeidiSQL screenshot)
-Laragon · MySQL 8.4.3 · `127.0.0.1` · db `runplan_db` · user `root`, no password · `utf8mb4` · API proxied at `127.0.0.1:3000` by Vite. 19 tables present, so migrations have run. `runplan_ai` is a second database on the same server — confirm which one is the live target before I write `012`, so I don't migrate the wrong one.
+#### Phase 4 — Anthropic Claude *(FR-02, FR-03, §5.1)*
+- A/F: Structured AI plan proposals validated through `PlanModel::build()` with deterministic template fallback (`ai_plan_requests`) + coaching feedback (`ai_feedback`).
+
+#### Phase 5 — OpenWeatherMap Advisories *(§5.2)*
+- A/F: Forecast horizon check, `weather_cache`, and workout weather strip.
+
+#### Phase 6 — Google Calendar Sync *(§5.3)*
+- A/F: Opt-in OAuth flow, encrypted tokens in `integration_accounts`, idempotent `calendar_event_mappings` create/update.
+
+#### Phase 7 — Push Reminders & Final Verification *(§5.4, §10)*
+- A/F: Web Push / FCM subscriptions, `notification_jobs` worker, quiet hours, in-app fallback, and full TC-01…TC-15 verification *(Strava remains excluded)*.
+
+---
+
+## 4. Confirmed environment notes
+Laragon · MySQL 8.4.3 · `127.0.0.1` · live database `runplandb` (`DB_NAME=runplandb`) · user `root`, no password · `utf8mb4` · API proxied at `127.0.0.1:3000` by Vite (`http://localhost:5173`).

@@ -31,8 +31,24 @@ define('PREVENT_DIRECT_ACCESS', true);
 
 // Minimal framework surface. PlanModel only needs to exist as a subclass of
 // Model and to not touch the database, which build() does not.
+$GLOBALS['rp_config'] = array(
+    'refresh_token_key'    => 'test-refresh-hmac-key-for-phase0-suite',
+    'refresh_token_table'  => 'refresh_tokens',
+    'refresh_token_column' => 'token_hash',
+);
+$GLOBALS['rp_lava'] = new stdClass();
+
 if (!function_exists('config_item')) {
-    function config_item($item) { return null; }
+    function config_item($item)
+    {
+        return $GLOBALS['rp_config'][$item] ?? null;
+    }
+}
+if (!function_exists('lava_instance')) {
+    function lava_instance()
+    {
+        return $GLOBALS['rp_lava'];
+    }
 }
 require_once RP_ROOT . 'scheme/kernel/Model.php';
 require_once RP_ROOT . 'app/models/PlanModel.php';

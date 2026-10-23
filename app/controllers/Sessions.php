@@ -1,13 +1,19 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
+/**
+ * Controller: Sessions
+ *
+ * Updates a training session on the runner's active plan (either moving its
+ * date or toggling `planned` / `skipped` status).
+ */
 class Sessions extends Controller {
 
     public function update($id = '')
     {
         $this->call->library('api');
         $this->call->database();
-        $this->call->model('PlanModel');
+        $this->call->model('SessionModel');
 
         $this->api->require_method('PATCH');
         $payload = $this->api->require_jwt();
@@ -23,13 +29,27 @@ class Sessions extends Controller {
             $this->api->respond_error('Invalid JSON body', 400);
         }
 
+        $has_date   = array_key_exists('scheduled_date', $input);
+        $has_status = array_key_exists('status', $input);
+
+        if ($has_date && $has_status) {
+            $this->api->respond([
+                'error'  => 'Validation failed',
+                'fields' => [
+                    'scheduled_date' => 'Send either scheduled_date or status per request, not both.',
+                ],
+            ], 422);
+        }
+
         // Move to another day
-        if (array_key_exists('scheduled_date', $input)) {
-            [$session, $err] = $this->PlanModel->reschedule_session($user_id, $id, (string) $input['scheduled_date']);
+        if ($has_date) {
+            [$session, $err] = $this->SessionModel->reschedule($user_id, $id, (string) $input['scheduled_date']);
             if ($err) {
                 if ($err[0] === 422) {
-                    $this->api->respond(['error' => 'Validation failed',
-                        'fields' => ['scheduled_date' => $err[1]]], 422);
+                    $this->api->respond([
+                        'error'  => 'Validation failed',
+                        'fields' => ['scheduled_date' => $err[1]],
+                    ], 422);
                 }
                 $this->api->respond_error($err[1], $err[0]);
             }
@@ -39,11 +59,13 @@ class Sessions extends Controller {
         // Skip or un-skip
         $status = $input['status'] ?? null;
         if (!in_array($status, ['planned', 'skipped'], true)) {
-            $this->api->respond(['error' => 'Validation failed',
-                'fields' => ['status' => 'Use planned or skipped.']], 422);
+            $this->api->respond([
+                'error'  => 'Validation failed',
+                'fields' => ['status' => 'Use planned or skipped.'],
+            ], 422);
         }
 
-        $result = $this->PlanModel->set_session_status($user_id, $id, $status);
+        $result = $this->SessionModel->set_status($user_id, $id, $status);
         if ($result === null) {
             $this->api->respond_error('Session not found.', 404);
         }

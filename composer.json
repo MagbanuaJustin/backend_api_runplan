@@ -1,0 +1,18 @@
+{
+  "name": "magbanuajustin/runplan-lavalust-api",
+  "description": "RunPlan AI: Adaptive Marathon Training Planner REST API (LavaLust 4.6)",
+  "type": "project",
+  "license": "MIT",
+  "require": {
+    "php": ">=8.2",
+    "ext-curl": "*",
+    "ext-json": "*",
+    "ext-mbstring": "*",
+    "ext-openssl": "*",
+    "ext-pdo": "*"
+  },
+  "scripts": {
+    "test": "php tests/run.php",
+    "check": "bash ./scripts/check.sh"
+  }
+}

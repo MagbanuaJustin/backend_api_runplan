@@ -2,9 +2,7 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
- * Controller: Plans
- * 
- * Automatically generated via CLI.
+ * Controller: Dashboard
  */
 class Dashboard extends Controller {
 
@@ -13,7 +11,7 @@ class Dashboard extends Controller {
         $this->call->library('api');
         $this->call->database();
         $this->call->model('DashboardModel');
-        $this->call->model('PlanModel');
+        $this->call->model('SessionModel');
 
         $this->api->require_method('GET');
         $payload = $this->api->require_jwt();
@@ -32,7 +30,7 @@ class Dashboard extends Controller {
             }
         }
 
-        $this->PlanModel->mark_missed_for_user($user_id);
+        $this->SessionModel->mark_missed_for_user($user_id, $today);
 
         header('Cache-Control: no-store');
         $this->api->respond(['data' => $this->DashboardModel->summary($user_id, $today)]);

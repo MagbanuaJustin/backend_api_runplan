@@ -140,30 +140,6 @@ class UserModel extends Model {
         return true;
     }
 
-    /**
-     * Permanently delete a runner's account and all cascading first-party data,
-     * recording a non-PII completion entry in `account_deletion_requests`.
-     */
-    public function delete_account($user_id, array $provider_cleanup_summary = [])
-    {
-        $uid = (int) $user_id;
-
-        $this->db->transaction();
-        try {
-            $this->db->raw(
-                "INSERT INTO account_deletion_requests
-                    (user_id, status, provider_cleanup_summary, completed_at)
-                 VALUES (?, 'completed', ?, CURRENT_TIMESTAMP)",
-                [$uid, json_encode($provider_cleanup_summary, JSON_UNESCAPED_SLASHES)]
-            );
-            $this->db->raw('DELETE FROM users WHERE id = ?', [$uid]);
-            $this->db->commit();
-        } catch (Throwable $e) {
-            $this->db->roll_back();
-            throw $e;
-        }
-    }
-
     // ------------------------------------------------------------------
     // Presentation
     // ------------------------------------------------------------------

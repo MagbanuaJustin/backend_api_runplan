@@ -1,102 +1,94 @@
-# 🔥 LavaLust Framework  
-**Lightweight • Fast • MVC for PHP Developers**
+# RunPlan AI — Backend REST API (`runplan_lavalust_api`)
 
-LavaLust is a lightweight PHP framework built for developers who want a
-**structured, modular, and scalable** development experience — without
-unnecessary complexity or performance overhead.
+REST API for **RunPlan AI: Adaptive Marathon Training Planner**, built on **LavaLust 4.6** (`PHP 8.2+`, `MySQL 8.x`). Paired with the companion React 19 + Vite SPA (`runplan_frontend`).
 
 ---
 
-## ❓ What is LavaLust?
+## Requirements
 
-**LavaLust** is a PHP framework that follows the  
-**MVC (Model–View–Controller)** architectural pattern.
-
-It is designed for developers who want:
-- Clean project structure
-- Modular and maintainable code
-- Built-in routing and database tools
-- REST API–ready applications
+- **PHP 8.2+** with `pdo_mysql`, `curl`, `mbstring`, `openssl`, `json`
+- **MySQL 8.x** (Laragon local default: `127.0.0.1:3306`, database `runplandb`)
 
 ---
 
-## 🚀 Key Features
+## Quick Start (Local / Laragon)
 
-### 🧠 MVC Architecture  
-Clear separation between **Models**, **Views**, and **Controllers**.
+1. **Create `.env` from the template:**
+   ```bash
+   cp .env.example .env
+   ```
+   Verify your database and token keys in `.env`:
+   ```dotenv
+   DB_HOST=127.0.0.1
+   DB_PORT=3306
+   DB_NAME=runplandb
+   DB_USER=root
+   DB_PASS=
+   CORS_ORIGINS=http://localhost:5173
+   JWT_SECRET=<64-hex-secret>
+   REFRESH_TOKEN_KEY=<64-hex-secret>
+   ```
 
-### ⚙️ Built-in Routing  
-Clean and flexible routing system for mapping URLs to controllers.
+2. **Run database migrations (first-time setup):**
+   - Temporarily set `MIGRATION_ENABLED=true` in `.env`
+   - Visit `http://127.0.0.1:3000/migrate/run` (or run `php public/index.php migrate/run`)
+   - Set `MIGRATION_ENABLED=false` again when finished
 
-### 📦 Libraries & Helpers  
-Reusable helpers and libraries for sessions, forms, validation, database access,
-and more.
+3. **Start the API server on port `3000` (matching Vite's `/api` proxy):**
+   ```bash
+   php -S 127.0.0.1:3000 -t public
+   ```
+   *(Or `php lava serve --port=3000` if using the LavaLust CLI.)*
 
-### 📁 Modular Design  
-Supports scalable development and clean organization of application logic.
-
-### 🔗 REST API Support  
-Easily build RESTful APIs using LavaLust conventions and tools.
-
-### 📘 ORM-like Models  
-Simplified database interaction with structured, readable model methods.
+4. **Verify health check:**
+   ```bash
+   curl http://127.0.0.1:3000/api/health
+   ```
+   Expected response:
+   ```json
+   {"status":"ok","service":"runplan-api","time":"..."}
+   ```
 
 ---
 
-## 🧪 Quick Example
+## Running Automated Checks & Tests
 
-### Route Definition  
-**File:** `app/config/routes.php`
+No external database or Composer vendor install is needed to run the test suite (uses PHP's built-in tokenizer + in-memory SQLite where needed):
 
-```php
-$router->get('/', 'Welcome::index');
-```
-### Controller
-**File:** `app/controllers/Welcome.php`
+- **Windows (PowerShell / Laragon Terminal):**
+  ```powershell
+  php tests/run.php
+  ```
+- **Git Bash / Linux / macOS / CI:**
+  ```bash
+  ./scripts/check.sh
+  ```
 
-```php
-class WelcomeController extends Controller
-{
-    public function index()
-    {
-        $this->call->view('welcome');
-    }
-}
-```
+---
 
-### View
-**File:** `app/views/welcome.php`
+## Core API Endpoints (Phase 0)
 
-### Output
-<h1>Welcome to LavaLust Framework</h1>
-<p>Lightweight. Fast. MVC.</p>
-
-## 🎯 Philosophy
-Minimal core. Maximum control.
-
-LavaLust avoids heavy abstractions while giving developers the tools they need
-to build clean, scalable applications.
-
-## 📚 Learn More
-📦 GitHub Repository
-👉 https://github.com/ronmarasigan/lavalust
-
-📖 Official Documentation
-👉 https://lavalust.netlify.app
-
-## 🤝 Contributing
-Contributions are welcome and appreciated.
-
-Fork the repository
-
-Create a feature branch
-
-Commit your changes
-
-Open a pull request
-
-## 📜 License
-LavaLust Framework is open-source software licensed under the MIT License.
-
-# 🔥 LavaLust — Clean structure. Real control.
-
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/health` | Public | Liveness + database connectivity check |
+| `OPTIONS` | `/api/*` | Public | CORS preflight (`204 No Content`) |
+| `POST` | `/api/auth/register` | Public | Create runner account |
+| `POST` | `/api/auth/login` | Public | Issue access JWT + `rp_refresh` HttpOnly cookie |
+| `POST` | `/api/auth/refresh` | Cookie | Rotate refresh token and issue new access JWT |
+| `POST` | `/api/auth/logout` | Public | Revoke refresh token and clear cookie |
+| `GET` | `/api/auth/me` | Bearer | Current runner profile summary |
+| `GET` | `/api/profile` | Bearer | Get runner training profile |
+| `PUT` | `/api/profile` | Bearer | Create or update runner training profile |
+| `POST` | `/api/plans/generate` | Bearer | Generate deterministic draft training plan |
+| `GET` | `/api/plans/current` | Bearer | Fetch current active or draft plan with sessions |
+| `POST` | `/api/plans/{id}/approve` | Bearer | Activate draft plan |
+| `POST` | `/api/plans/{id}/rebuild` | Bearer | Rebuild remaining schedule from recent manual runs |
+| `GET` | `/api/plans/{id}/revisions` | Bearer | List plan version history |
+| `PATCH` | `/api/sessions/{id}` | Bearer | Reschedule session (`scheduled_date`) or update `status` |
+| `GET` | `/api/activities` | Bearer | List manual runs (supports `?from=YYYY-MM-DD&to=YYYY-MM-DD`) |
+| `GET` | `/api/activities/{id}` | Bearer | Fetch single manual run |
+| `POST` | `/api/activities` | Bearer | Log manual run (and complete linked session) |
+| `PUT` | `/api/activities/{id}` | Bearer | Update manual run |
+| `DELETE` | `/api/activities/{id}` | Bearer | Delete manual run (and reopen linked session) |
+| `GET` | `/api/dashboard` | Bearer | Consistency, weekly volume, pace & recent runs |
+| `GET` | `/api/integrations/status` | Bearer | Read-only provider readiness (`core_enabled: true`) |

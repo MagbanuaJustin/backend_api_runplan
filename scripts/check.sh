@@ -51,7 +51,11 @@ echo "== syntax"
 
 echo
 echo "== tests"
-"$PHP" tests/run.php
+TEST_OUT="$("$PHP" tests/run.php)"
+echo "$TEST_OUT"
+if echo "$TEST_OUT" | grep -q "assertions failed"; then
+  exit 1
+fi
 
 echo
 echo "all checks passed"
