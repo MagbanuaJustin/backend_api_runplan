@@ -99,12 +99,8 @@ class Plans extends Controller {
         }
 
         // Longest run of the last 3 weeks: the rebuilt plan continues from what the runner really did
-        $row = $this->db->raw(
-            'SELECT MAX(distance_km) AS d FROM activities
-              WHERE user_id = ? AND activity_date >= DATE_SUB(UTC_DATE(), INTERVAL 21 DAY)',
-            [$user_id]
-        )->fetch(PDO::FETCH_ASSOC);
-        $recent = ($row && $row['d'] !== null) ? (float) $row['d'] : null;
+        $this->call->model('ActivityModel');
+        $recent = $this->ActivityModel->longest_recent_run_km($user_id, 21);
 
         $today = new DateTimeImmutable('today', new DateTimeZone('UTC'));
         [$data, $err] = $this->PlanModel->rebuild_remaining($user_id, $id, $profile, $today, $recent);

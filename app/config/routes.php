@@ -44,22 +44,36 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 */
 $router->get('/', 'Welcome::index');
 $router->get('/api/health', 'Health::index');
+$router->options('/api/{a?}/{b?}/{c?}/{d?}', 'Health::preflight');
 $router->get('/migrate/run', 'Migrate::run');
-$router->get('/api/activities', 'Activities::index');
+
+// Auth & identity (email/password, Google Sign-In/link, recovery)
 $router->post('/api/auth/register', 'Auth::register');
 $router->post('/api/auth/login', 'Auth::login');
+$router->post('/api/auth/google', 'Auth::google');
+$router->post('/api/auth/google/link', 'Auth::link_google');
+$router->delete('/api/auth/google/link', 'Auth::unlink_google');
+$router->post('/api/auth/forgot-password', 'Auth::forgot_password');
+$router->post('/api/auth/reset-password', 'Auth::reset_password');
 $router->post('/api/auth/refresh', 'Auth::refresh');
 $router->get('/api/auth/me', 'Auth::me');
 $router->post('/api/auth/logout', 'Auth::logout');
+
+// Activities
+$router->get('/api/activities', 'Activities::index');
+$router->get('/api/activities/{id}', 'Activities::show');
 $router->post('/api/activities', 'Activities::store');
 $router->delete('/api/activities/{id}', 'Activities::destroy');
 $router->put('/api/activities/{id}', 'Activities::update');
+
+// Profile, Plans, Sessions, Dashboard, Integrations
 $router->get('/api/profile', 'Profile::show');
 $router->put('/api/profile', 'Profile::save');
 $router->post('/api/plans/generate', 'Plans::generate');
 $router->get('/api/plans/current', 'Plans::current');
 $router->post('/api/plans/{id}/approve', 'Plans::approve');
-$router->patch('/api/sessions/{id}', 'Sessions::update');
-$router->get('/api/dashboard', 'Dashboard::index');
 $router->post('/api/plans/{id}/rebuild', 'Plans::rebuild');
 $router->get('/api/plans/{id}/revisions', 'Plans::revisions');
+$router->patch('/api/sessions/{id}', 'Sessions::update');
+$router->get('/api/dashboard', 'Dashboard::index');
+$router->get('/api/integrations', 'Integrations::status');

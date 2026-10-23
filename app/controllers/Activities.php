@@ -2,9 +2,7 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
- * Controller: Plans
- * 
- * Automatically generated via CLI.
+ * Controller: Activities
  */
 class Activities extends Controller {
 
@@ -15,12 +13,37 @@ class Activities extends Controller {
         $this->call->model('ActivityModel');
 
         $this->api->require_method('GET');
-        $payload = $this->api->require_jwt();   // 401 if the token is missing, bad or expired
+        $payload = $this->api->require_jwt();
+
+        $filters = [
+            'from' => $_GET['from'] ?? null,
+            'to'   => $_GET['to'] ?? null,
+        ];
 
         header('Cache-Control: no-store');
         $this->api->respond([
-            'data' => $this->ActivityModel->for_user((int) $payload['sub']),
+            'data' => $this->ActivityModel->for_user((int) $payload['sub'], $filters),
         ]);
+    }
+
+    public function show($id = '')
+    {
+        $this->call->library('api');
+        $this->call->database();
+        $this->call->model('ActivityModel');
+
+        $this->api->require_method('GET');
+        $payload = $this->api->require_jwt();
+
+        $row = ctype_digit((string) $id)
+            ? $this->ActivityModel->find_for_user((int) $payload['sub'], $id)
+            : null;
+        if (!$row) {
+            $this->api->respond_error('Run not found.', 404);
+        }
+
+        header('Cache-Control: no-store');
+        $this->api->respond(['data' => $row]);
     }
 
     public function destroy($id = '')

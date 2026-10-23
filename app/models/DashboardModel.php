@@ -2,13 +2,20 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
- * Model: ActivityModel
- * 
- * Automatically generated via CLI.
+ * Model: DashboardModel
+ *
+ * First-party performance analytics and deterministic metric summaries used by
+ * both GET /api/dashboard and the Anthropic AI training feedback service.
+ *
+ * Spec 5.5 / TC-10 / TC-15 boundary: every query on `activities` filters
+ * `source = 'manual'` so external/restricted records can never enter
+ * RunPlan analytics or AI coaching prompts.
  */
 class DashboardModel extends Model {
     protected $table = 'activities';
     protected $primary_key = 'id';
+
+    const ELIGIBLE_SOURCE = 'manual';
 
     public function summary($user_id, DateTimeImmutable $today)
     {
@@ -26,9 +33,103 @@ class DashboardModel extends Model {
         ];
     }
 
+    /**
+     * Source-of-truth deterministic summary for AI coaching feedback
+     * (Spec Module 3 & Section 5.1, TC-14, TC-15).
+     *
+     * Contains ONLY aggregate first-party RunPlan numbers — never personal
+     * identifiers (email/display_name) and never non-manual activity sources.
+     */
+    public function coaching_snapshot($user_id, DateTimeImmutable $today, $days = 28)
+    {
+        $uid        = (int) $user_id;
+        $days       = max(14, min(90, (int) $days));
+        $half       = intdiv($days, 2);
+        $end_str    = $today->format('Y-m-d');
+        $start_str  = $today->modify('-' . ($days - 1) . ' days')->format('Y-m-d');
+        $mid_end    = $today->modify('-' . $half . ' days')->format('Y-m-d');
+        $recent_beg = $today->modify('-' . ($half - 1) . ' days')->format('Y-m-d');
+
+        $overall = $this->window($uid, $start_str, $end_str);
+        $prior   = $this->window($uid, $start_str, $mid_end);
+        $recent  = $this->window($uid, $recent_beg, $end_str);
+
+        $pace_trend      = 'insufficient_data';
+        $pace_delta_sec  = null;
+        if ($prior['runs'] >= 2 && $recent['runs'] >= 2
+            && $prior['pace_seconds_per_km'] !== null && $recent['pace_seconds_per_km'] !== null) {
+            $pace_delta_sec = $recent['pace_seconds_per_km'] - $prior['pace_seconds_per_km'];
+            if ($pace_delta_sec <= -8) {
+                $pace_trend = 'faster';
+            } elseif ($pace_delta_sec >= 8) {
+                $pace_trend = 'slower';
+            } else {
+                $pace_trend = 'steady';
+            }
+        }
+
+        // Scheduled session adherence within the analyzed period on active plan
+        $adherence = [
+            'has_active_plan'   => false,
+            'goal'              => null,
+            'scheduled_due'     => 0,
+            'completed'         => 0,
+            'skipped'           => 0,
+            'missed'            => 0,
+            'completion_rate'   => null,
+            'skipped_treatment' => 'Skipped sessions remain in the scheduled-due denominator (completion_rate = completed / scheduled_due * 100) so deliberate skips are distinguished from unlogged missed runs without inflating adherence.',
+        ];
+
+        $plan = $this->db->raw(
+            "SELECT id, goal FROM training_plans WHERE user_id = ? AND status = 'active' LIMIT 1",
+            [$uid]
+        )->fetch(PDO::FETCH_ASSOC);
+
+        if ($plan) {
+            $a = $this->db->raw(
+                "SELECT COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) AS completed,
+                        COALESCE(SUM(CASE WHEN status = 'skipped'   THEN 1 ELSE 0 END), 0) AS skipped,
+                        COALESCE(SUM(CASE WHEN status = 'missed'    THEN 1 ELSE 0 END), 0) AS missed,
+                        COUNT(*)                                                           AS due
+                   FROM training_sessions
+                  WHERE plan_id = ? AND user_id = ?
+                    AND scheduled_date >= ? AND (scheduled_date <= ? OR status = 'completed')",
+                [(int) $plan['id'], $uid, $start_str, $end_str]
+            )->fetch(PDO::FETCH_ASSOC);
+
+            $due       = (int) ($a['due'] ?? 0);
+            $completed = (int) ($a['completed'] ?? 0);
+            $adherence = [
+                'has_active_plan'   => true,
+                'goal'              => $plan['goal'],
+                'scheduled_due'     => $due,
+                'completed'         => $completed,
+                'skipped'           => (int) ($a['skipped'] ?? 0),
+                'missed'            => (int) ($a['missed'] ?? 0),
+                'completion_rate'   => $due > 0 ? (int) round(100 * $completed / $due) : null,
+                'skipped_treatment' => $adherence['skipped_treatment'],
+            ];
+        }
+
+        return [
+            'period_start'       => $start_str,
+            'period_end'         => $end_str,
+            'window_days'        => $days,
+            'eligible_source'    => self::ELIGIBLE_SOURCE,
+            'totals'             => $overall,
+            'pace_comparison'    => [
+                'prior_half'     => $prior,
+                'recent_half'    => $recent,
+                'trend'          => $pace_trend,
+                'delta_sec_km'   => $pace_delta_sec,
+            ],
+            'adherence'          => $adherence,
+        ];
+    }
+
     private function pace($seconds, $km)
     {
-        if ($km <= 0) {
+        if ($km <= 0 || $seconds <= 0) {
             return [null, null];
         }
         $p = (int) round($seconds / $km);
@@ -39,16 +140,17 @@ class DashboardModel extends Model {
     {
         $r = $this->db->raw(
             'SELECT COUNT(*) AS runs, COALESCE(SUM(distance_km), 0) AS km, COALESCE(SUM(duration_seconds), 0) AS sec
-               FROM activities WHERE user_id = ? AND activity_date BETWEEN ? AND ?',
-            [$uid, $from, $to]
+               FROM activities
+              WHERE user_id = ? AND source = ? AND activity_date BETWEEN ? AND ?',
+            [$uid, self::ELIGIBLE_SOURCE, $from, $to]
         )->fetch(PDO::FETCH_ASSOC);
 
-        $km  = (float) $r['km'];
-        $sec = (int) $r['sec'];
+        $km  = (float) ($r['km'] ?? 0);
+        $sec = (int) ($r['sec'] ?? 0);
         [$pace, $label] = $this->pace($sec, $km);
 
         return [
-            'runs'                => (int) $r['runs'],
+            'runs'                => (int) ($r['runs'] ?? 0),
             'distance_km'         => round($km, 1),
             'duration_seconds'    => $sec,
             'pace_seconds_per_km' => $pace,
@@ -69,10 +171,10 @@ class DashboardModel extends Model {
 
         $t = $today->format('Y-m-d');
         $a = $this->db->raw(
-            "SELECT COALESCE(SUM(status = 'completed'), 0) AS completed,
-                    COALESCE(SUM(status = 'skipped'), 0)   AS skipped,
-                    COALESCE(SUM(status = 'missed'), 0)    AS missed,
-                    COUNT(*)                               AS due
+            "SELECT COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) AS completed,
+                    COALESCE(SUM(CASE WHEN status = 'skipped'   THEN 1 ELSE 0 END), 0) AS skipped,
+                    COALESCE(SUM(CASE WHEN status = 'missed'    THEN 1 ELSE 0 END), 0) AS missed,
+                    COUNT(*)                                                           AS due
                FROM training_sessions
               WHERE plan_id = ? AND user_id = ? AND (scheduled_date < ? OR status = 'completed')",
             [(int) $plan['id'], $uid, $t]
@@ -91,9 +193,10 @@ class DashboardModel extends Model {
         $end   = new DateTimeImmutable($plan['end_date'], $utc);
         $total = intdiv((int) $start->diff($end)->days, 7) + 1;
         $since = (int) $start->diff($today)->format('%r%a');
-        $due   = (int) $a['due'];
+        $due   = (int) ($a['due'] ?? 0);
 
         return [
+            'id'              => (int) $plan['id'],
             'goal'            => $plan['goal'],
             'start_date'      => $plan['start_date'],
             'end_date'        => $plan['end_date'],
@@ -101,9 +204,9 @@ class DashboardModel extends Model {
             'total_weeks'     => $total,
             'days_left'       => (int) $today->diff($end)->format('%r%a'),
             'due'             => $due,
-            'completed'       => (int) $a['completed'],
-            'skipped'         => (int) $a['skipped'],
-            'missed'          => (int) $a['missed'],
+            'completed'       => (int) ($a['completed'] ?? 0),
+            'skipped'         => (int) ($a['skipped'] ?? 0),
+            'missed'          => (int) ($a['missed'] ?? 0),
             'completion_rate' => $due > 0 ? (int) round(100 * (int) $a['completed'] / $due) : null,
             'next_session'    => $next ? [
                 'id'                       => (int) $next['id'],
@@ -118,38 +221,70 @@ class DashboardModel extends Model {
 
     private function weekly($uid, DateTimeImmutable $today)
     {
+        $utc  = new DateTimeZone('UTC');
         $t    = $today->format('Y-m-d');
         $from = $today->modify('-55 days')->format('Y-m-d');
 
-        $actual = [];
+        $actual_km  = [];
+        $actual_sec = [];
+        $actual_cnt = [];
+
         $rows = $this->db->raw(
-            'SELECT FLOOR(DATEDIFF(?, activity_date) / 7) AS b, SUM(distance_km) AS km
-               FROM activities WHERE user_id = ? AND activity_date BETWEEN ? AND ? GROUP BY b',
-            [$t, $uid, $from, $t]
+            'SELECT activity_date, distance_km, duration_seconds
+               FROM activities
+              WHERE user_id = ? AND source = ? AND activity_date BETWEEN ? AND ?',
+            [$uid, self::ELIGIBLE_SOURCE, $from, $t]
         )->fetchAll(PDO::FETCH_ASSOC);
+
         foreach ($rows as $r) {
-            $actual[(int) $r['b']] = (float) $r['km'];
+            $d = DateTimeImmutable::createFromFormat('!Y-m-d', $r['activity_date'], $utc);
+            if (!$d) {
+                continue;
+            }
+            $b = intdiv((int) $d->diff($today)->days, 7);
+            if ($b < 0 || $b > 7) {
+                continue;
+            }
+            $actual_km[$b]  = ($actual_km[$b] ?? 0.0) + (float) $r['distance_km'];
+            $actual_sec[$b] = ($actual_sec[$b] ?? 0) + (int) $r['duration_seconds'];
+            $actual_cnt[$b] = ($actual_cnt[$b] ?? 0) + 1;
         }
 
         $planned = [];
         $rows = $this->db->raw(
-            "SELECT FLOOR(DATEDIFF(?, s.scheduled_date) / 7) AS b, SUM(s.planned_distance_km) AS km
+            "SELECT s.scheduled_date, s.planned_distance_km
                FROM training_sessions s JOIN training_plans p ON p.id = s.plan_id
               WHERE s.user_id = ? AND p.status = 'active' AND s.status <> 'skipped'
-                AND s.scheduled_date BETWEEN ? AND ? GROUP BY b",
-            [$t, $uid, $from, $t]
+                AND s.scheduled_date BETWEEN ? AND ?",
+            [$uid, $from, $t]
         )->fetchAll(PDO::FETCH_ASSOC);
+
         foreach ($rows as $r) {
-            $planned[(int) $r['b']] = (float) $r['km'];
+            $d = DateTimeImmutable::createFromFormat('!Y-m-d', $r['scheduled_date'], $utc);
+            if (!$d) {
+                continue;
+            }
+            $b = intdiv((int) $d->diff($today)->days, 7);
+            if ($b >= 0 && $b <= 7) {
+                $planned[$b] = ($planned[$b] ?? 0.0) + (float) $r['planned_distance_km'];
+            }
         }
 
         $weeks = [];
         for ($i = 7; $i >= 0; $i--) {
+            $km  = $actual_km[$i] ?? 0.0;
+            $sec = $actual_sec[$i] ?? 0;
+            [$pace_sec, $pace_lbl] = $this->pace($sec, $km);
+
             $weeks[] = [
-                'start'      => $today->modify('-' . (6 + 7 * $i) . ' days')->format('Y-m-d'),
-                'end'        => $today->modify('-' . (7 * $i) . ' days')->format('Y-m-d'),
-                'actual_km'  => round($actual[$i] ?? 0, 1),
-                'planned_km' => round($planned[$i] ?? 0, 1),
+                'start'                      => $today->modify('-' . (6 + 7 * $i) . ' days')->format('Y-m-d'),
+                'end'                        => $today->modify('-' . (7 * $i) . ' days')->format('Y-m-d'),
+                'actual_km'                  => round($km, 1),
+                'planned_km'                 => round($planned[$i] ?? 0.0, 1),
+                'runs'                       => $actual_cnt[$i] ?? 0,
+                'actual_duration_seconds'    => $sec,
+                'actual_pace_seconds_per_km' => $pace_sec,
+                'actual_pace_label'          => $pace_lbl,
             ];
         }
         return $weeks;
@@ -159,8 +294,10 @@ class DashboardModel extends Model {
     {
         $rows = $this->db->raw(
             'SELECT id, activity_date, distance_km, duration_seconds, effort, session_id
-               FROM activities WHERE user_id = ? ORDER BY activity_date DESC, id DESC LIMIT 5',
-            [$uid]
+               FROM activities
+              WHERE user_id = ? AND source = ?
+              ORDER BY activity_date DESC, id DESC LIMIT 5',
+            [$uid, self::ELIGIBLE_SOURCE]
         )->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map(function ($r) {

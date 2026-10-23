@@ -3,24 +3,49 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Model: ActivityModel
- * 
- * Automatically generated via CLI.
+ *
+ * Manual first-party running activities.
+ *
+ * Spec 5.5 / TC-10 / TC-15 data boundary: only first-party RunPlan records
+ * (`source = 'manual'`) are eligible for analytics, plan adaptation, or
+ * Anthropic AI prompts. Even while Strava remains disabled pending policy
+ * review, every read path that feeds metrics or AI enforces ELIGIBLE_SOURCE.
  */
 class ActivityModel extends Model {
     protected $table = 'activities';
     protected $primary_key = 'id';
+
+    const ELIGIBLE_SOURCE = 'manual';
 
     protected $fillable = [
         'session_id', 'activity_date', 'distance_km',
         'duration_seconds', 'effort', 'notes',
     ];
 
-    public function for_user($user_id)
+    /**
+     * Explicit gate used by analytics and AI summary builders (TC-10, TC-15).
+     */
+    public static function is_eligible_for_analytics(array $row)
     {
-        $rows = $this->db->table($this->table)
-            ->where('user_id', (int) $user_id)
-            ->order_by('activity_date', 'DESC')
-            ->get_all() ?: [];
+        return ($row['source'] ?? '') === self::ELIGIBLE_SOURCE;
+    }
+
+    public function for_user($user_id, array $filters = [])
+    {
+        $sql  = 'SELECT * FROM activities WHERE user_id = ? AND source = ?';
+        $args = [(int) $user_id, self::ELIGIBLE_SOURCE];
+
+        if (!empty($filters['from']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $filters['from'])) {
+            $sql   .= ' AND activity_date >= ?';
+            $args[] = (string) $filters['from'];
+        }
+        if (!empty($filters['to']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $filters['to'])) {
+            $sql   .= ' AND activity_date <= ?';
+            $args[] = (string) $filters['to'];
+        }
+
+        $sql .= ' ORDER BY activity_date DESC, id DESC';
+        $rows = $this->db->raw($sql, $args)->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         return array_map([$this, 'with_pace'], $rows);
     }
@@ -33,9 +58,10 @@ class ActivityModel extends Model {
         $row['id']               = (int) $row['id'];
         $row['distance_km']      = $km;
         $row['duration_seconds'] = $sec;
-        $row['session_id'] = $row['session_id'] !== null ? (int) $row['session_id'] : null;
+        $row['session_id']       = $row['session_id'] !== null ? (int) $row['session_id'] : null;
+        $row['effort']           = $row['effort'] !== null ? (int) $row['effort'] : null;
 
-        if ($km > 0) {
+        if ($km > 0 && $sec > 0) {
             $pace = (int) round($sec / $km);
             $row['pace_seconds_per_km'] = $pace;
             $row['pace_label'] = sprintf('%d:%02d', intdiv($pace, 60), $pace % 60);
@@ -46,10 +72,10 @@ class ActivityModel extends Model {
         return $row;
     }
 
-        // Returns [clean_data, errors]. Reused later by edit (PUT).
+    // Returns [clean_data, errors]. Reused by store (POST) and update (PUT).
     public function validate(array $in)
     {
-        $clean = [];
+        $clean  = [];
         $errors = [];
 
         $date = (string) ($in['activity_date'] ?? '');
@@ -114,18 +140,43 @@ class ActivityModel extends Model {
 
     public function find_for_user($user_id, $id)
     {
-        $row = $this->db->table($this->table)
-            ->where('id', (int) $id)
-            ->where('user_id', (int) $user_id)
-            ->get();
+        $row = $this->db->raw(
+            'SELECT * FROM activities WHERE id = ? AND user_id = ? LIMIT 1',
+            [(int) $id, (int) $user_id]
+        )->fetch(PDO::FETCH_ASSOC);
 
         return $row ? $this->with_pace($row) : null;
+    }
+
+    /**
+     * Longest first-party run in the last N days, used to seed a rebuilt plan
+     * from what the runner actually did instead of what they once declared.
+     *
+     * Strictly scoped to ELIGIBLE_SOURCE (`manual`) per Spec 5.5 / TC-10.
+     *
+     * @param int                    $user_id
+     * @param int                    $days
+     * @param DateTimeImmutable|null $today
+     * @return float|null
+     */
+    public function longest_recent_run_km($user_id, $days = 21, ?DateTimeImmutable $today = null)
+    {
+        $ref    = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
+        $cutoff = $ref->modify('-' . max(1, (int) $days) . ' days')->format('Y-m-d');
+
+        $row = $this->db->raw(
+            'SELECT MAX(distance_km) AS d FROM activities
+              WHERE user_id = ? AND source = ? AND activity_date >= ?',
+            [(int) $user_id, self::ELIGIBLE_SOURCE, $cutoff]
+        )->fetch(PDO::FETCH_ASSOC);
+
+        return ($row && $row['d'] !== null) ? (float) $row['d'] : null;
     }
 
     // Returns the new activity, or null if the session was completed meanwhile
     public function create_for_user($user_id, array $clean, $session_id = null)
     {
-        $row = array_merge($clean, ['user_id' => (int) $user_id, 'source' => 'manual']);
+        $row = array_merge($clean, ['user_id' => (int) $user_id, 'source' => self::ELIGIBLE_SOURCE]);
         if ($session_id !== null) {
             $row['session_id'] = (int) $session_id;
         }
@@ -136,7 +187,7 @@ class ActivityModel extends Model {
 
         if ($session_id !== null) {
             $done = $this->db->raw(
-                "UPDATE training_sessions SET status = 'completed', updated_at = NOW()
+                "UPDATE training_sessions SET status = 'completed', updated_at = CURRENT_TIMESTAMP
                   WHERE id = ? AND user_id = ? AND status <> 'completed'",
                 [(int) $session_id, (int) $user_id]
             );
@@ -144,6 +195,12 @@ class ActivityModel extends Model {
                 $this->db->roll_back();
                 return null;
             }
+            // Cancel any pending reminder job for a session now completed
+            $this->db->raw(
+                "UPDATE notification_jobs SET status = 'cancelled'
+                  WHERE session_id = ? AND user_id = ? AND status = 'pending'",
+                [(int) $session_id, (int) $user_id]
+            );
         }
         $this->db->commit();
 
@@ -164,7 +221,7 @@ class ActivityModel extends Model {
         $this->db->raw('DELETE FROM activities WHERE id = ? AND user_id = ?', [(int) $id, (int) $user_id]);
         if ($found['session_id'] !== null) {
             $this->db->raw(
-                "UPDATE training_sessions SET status = 'planned', updated_at = NOW()
+                "UPDATE training_sessions SET status = 'planned', updated_at = CURRENT_TIMESTAMP
                   WHERE id = ? AND user_id = ? AND status = 'completed'",
                 [(int) $found['session_id'], (int) $user_id]
             );
@@ -174,11 +231,10 @@ class ActivityModel extends Model {
 
     public function update_for_user($user_id, $id, array $clean)
     {
-        // Explicit columns = whitelist. updated_at uses the database clock like created_at.
         $this->db->raw(
             'UPDATE activities
                 SET activity_date = ?, distance_km = ?, duration_seconds = ?,
-                    effort = ?, notes = ?, updated_at = NOW()
+                    effort = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND user_id = ?',
             [
                 $clean['activity_date'], $clean['distance_km'], $clean['duration_seconds'],
@@ -202,4 +258,3 @@ class ActivityModel extends Model {
         return $row ?: null;
     }
 }
-

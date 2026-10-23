@@ -56,6 +56,17 @@ class Api
     protected $refresh_token_table;
 
     /**
+     * Column holding the hashed refresh token.
+     *
+     * Kept configurable so an application's schema choice never has to be
+     * compiled into the framework. Overridable with refresh_token_column in
+     * app/config/api.php.
+     *
+     * @var string
+     */
+    protected $refresh_token_column = 'token_hash';
+
+    /**
      * Api Payload Token Expiration
      *
      * This is used for Payload Token Expiration.
@@ -143,6 +154,11 @@ class Api
 
         // Load config
         $this->refresh_token_table      = config_item('refresh_token_table') ?? $this->refresh_token_table;
+        $token_column = config_item('refresh_token_column') ?? $this->refresh_token_column;
+        // Interpolated into SQL, so restrict it to a bare identifier.
+        $this->refresh_token_column = (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', (string) $token_column) === 1)
+            ? (string) $token_column
+            : 'token_hash';
         $this->payload_token_expiration = (int) (config_item('payload_token_expiration') ?? $this->payload_token_expiration);
         $this->refresh_token_expiration = (int) (config_item('refresh_token_expiration') ?? $this->refresh_token_expiration);
         $this->jwt_secret               = config_item('jwt_secret');
@@ -542,7 +558,7 @@ class Api
         $expires_at = date('Y-m-d H:i:s', $now + $this->refresh_token_expiration);
 
         $this->_lava->db->raw(
-            "INSERT INTO {$this->refresh_token_table} (user_id, token_hash, expires_at, jti) 
+            "INSERT INTO {$this->refresh_token_table} (user_id, {$this->refresh_token_column}, expires_at, jti) 
              VALUES (?, ?, ?, ?)",
             [$user_id, $hashed_refresh, $expires_at, $refresh_payload['jti']]
         );
@@ -572,7 +588,7 @@ class Api
 
         $stmt = $this->_lava->db->raw(
             "SELECT * FROM {$this->refresh_token_table} 
-             WHERE token_hash = ? AND expires_at > NOW() LIMIT 1",
+             WHERE {$this->refresh_token_column} = ? AND expires_at > NOW() LIMIT 1",
             [$hashed]
         );
         $found = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -602,7 +618,7 @@ class Api
     {
         $hashed = hash_hmac('sha256', $refresh_token, $this->refresh_token_key);
         $this->_lava->db->raw(
-            "DELETE FROM {$this->refresh_token_table} WHERE token_hash = ?",
+            "DELETE FROM {$this->refresh_token_table} WHERE {$this->refresh_token_column} = ?",
             [$hashed]
         );
     }

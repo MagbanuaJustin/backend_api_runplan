@@ -110,6 +110,21 @@ $config['refresh_token_table'] = 'refresh_tokens';
 
 /*
 |--------------------------------------------------------------------------
+| Refresh Token Column
+|--------------------------------------------------------------------------
+|
+| Column in the table above that stores the HMAC of the refresh token.
+| runplan_db uses `token_hash` (renamed from `token` by migration 007), and
+| Api.php used to hardcode it - which put this application's schema inside the
+| framework. It is config now, so upgrading LavaLust cannot silently break
+| token rotation. Only a bare identifier is accepted; anything else falls back
+| to token_hash.
+|
+*/
+$config['refresh_token_column'] = 'token_hash';
+
+/*
+|--------------------------------------------------------------------------
 | JWT Issuer and Audience
 |--------------------------------------------------------------------------
 | These are used for JWT Issuer and Audience claims.
