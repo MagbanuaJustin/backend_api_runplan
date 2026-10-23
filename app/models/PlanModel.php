@@ -53,13 +53,24 @@ class PlanModel extends Model {
             $days  = (int) $start->diff($race)->format('%r%a');
             $weeks = (int) ceil(($days + 1) / 7);
 
-            if ($rebuild && $weeks < 1) {
-                return [null, ['target_race_date' => 'Your race date has already passed. Update it in your profile first.']];
-            }
-            if (!$rebuild && $weeks < self::MIN_WEEKS[$goal]) {
-                return [null, ['target_race_date' =>
-                    'Your race is more than ' . self::MAX_WEEKS
-                    . ' weeks away. Come back closer to the date, or choose general fitness.']];
+            if ($rebuild) {
+                // A rebuild must never be blocked by the "too close" rule: a runner whose race
+                // is weeks away still needs their remaining schedule rebuilt.
+                if ($weeks < 1) {
+                    return [null, ['target_race_date' =>
+                        'Your race date has already passed. Update it in your profile first.']];
+                }
+            } else {
+                if ($weeks < self::MIN_WEEKS[$goal]) {
+                    return [null, ['target_race_date' =>
+                        'Your race is too close for this goal. A safe plan needs at least '
+                        . self::MIN_WEEKS[$goal] . ' weeks.']];
+                }
+                if ($weeks > self::MAX_WEEKS) {
+                    return [null, ['target_race_date' =>
+                        'Your race is more than ' . self::MAX_WEEKS
+                        . ' weeks away. Come back closer to the date, or choose general fitness.']];
+                }
             }
             $end = $race;
         }

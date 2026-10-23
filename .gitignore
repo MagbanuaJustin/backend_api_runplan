@@ -18,7 +18,8 @@ runtime/*
 *.sublime-workspace
 *.sublime-project
 
-# Secrets
+# Secrets / local scratch files — never commit these
+#---------------------------------
 .env
 cookies.txt
 old.txt
@@ -26,9 +27,11 @@ before.txt
 body.json
 curl
 
-body.json
-cookies.txt
+# Residue of mistyped Windows shell redirects, e.g.  php ... > $r   findstr ... > 'Race
+#---------------------------------
 $*
 '*
 make_session*
 poweshell
+findstr
+curl.exe
