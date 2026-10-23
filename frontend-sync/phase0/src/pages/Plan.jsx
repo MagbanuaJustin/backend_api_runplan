@@ -25,29 +25,34 @@ function PlanSummary({ data }) {
     <>
       <dl className="stats">
         <div><dt>Goal</dt><dd>{GOALS[plan.goal] ?? plan.goal}</dd></div>
-        <div><dt>Dates</dt><dd>{formatDate(plan.start_date)} to {formatDate(plan.end_date)}</dd></div>
+        <div><dt>Schedule Window</dt><dd>{formatDate(plan.start_date)} &ndash; {formatDate(plan.end_date)}</dd></div>
         <div><dt>Length</dt><dd>{weeks.length} weeks</dd></div>
-        <div><dt>Runs per week</dt><dd>{plan.sessions_per_week}</dd></div>
-        <div><dt>Total distance</dt><dd>{Math.round(totalKm)} km</dd></div>
+        <div><dt>Runs / Week</dt><dd>{plan.sessions_per_week}</dd></div>
+        <div><dt>Total Volume</dt><dd>{Math.round(totalKm)} km</dd></div>
       </dl>
 
-      <details className="weeks">
-        <summary>Week by week</summary>
+      <details className="weeks" open>
+        <summary>Week-by-week breakdown ({weeks.length} weeks)</summary>
         <div className="table-wrap">
           <table>
             <caption className="sr-only">Planned distance for each week</caption>
             <thead>
-              <tr><th scope="col">Week</th><th scope="col">Starts</th><th scope="col">Runs</th>
-                <th scope="col">Distance</th><th scope="col">Long run</th></tr>
+              <tr>
+                <th scope="col">Week</th>
+                <th scope="col">Starts</th>
+                <th scope="col">Sessions</th>
+                <th scope="col">Volume</th>
+                <th scope="col">Long Run</th>
+              </tr>
             </thead>
             <tbody>
               {weeks.map((w) => (
                 <tr key={w.week}>
-                  <th scope="row">{w.week}</th>
-                  <td>{formatDate(w.starts)}</td>
-                  <td>{w.runs}</td>
-                  <td>{w.km.toFixed(1)} km</td>
-                  <td>{w.race ? 'Race week' : w.long !== null ? `${w.long} km` : '-'}</td>
+                  <th scope="row" className="mono">W{w.week}</th>
+                  <td className="mono">{formatDate(w.starts)}</td>
+                  <td className="mono">{w.runs}</td>
+                  <td className="mono">{w.km.toFixed(1)} km</td>
+                  <td className="mono">{w.race ? 'Race week' : w.long !== null ? `${w.long} km` : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -64,7 +69,7 @@ export default function Plan() {
   const [warnings, setWarnings] = useState([])
   const [activeWarnings, setActiveWarnings] = useState([])
   const [notice, setNotice] = useState('')
-  const [state, setState] = useState('loading') // loading | ready | error
+  const [state, setState] = useState('loading')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -162,19 +167,20 @@ export default function Plan() {
   return (
     <>
       <h1>Plan</h1>
-      <p className="note">
-        This is general training guidance, not medical advice. Check with a doctor before
-        starting a new training program.
-      </p>
+
+      <div className="advisory-banner">
+        <strong>Safety note:</strong> This schedule provides general running conditioning guidance, not medical advice.
+        Consult a qualified clinician before starting an intensive training block.
+      </div>
 
       {notice && <p className="success" role="status">{notice}</p>}
 
       {error && (
-        <div className="error" role="alert">
+        <div className="error" role="alert" style={{ marginBottom: 14 }}>
           {error.fields?.profile ? (
-            <p>Complete your profile first. <Link to="/profile">Go to Profile</Link></p>
+            <p>Complete your runner profile first. <Link to="/profile">Open Runner Profile &rarr;</Link></p>
           ) : error.fields?.target_race_date ? (
-            <p>{error.fields.target_race_date} <Link to="/profile">Change your race date</Link></p>
+            <p>{error.fields.target_race_date} <Link to="/profile">Update race date &rarr;</Link></p>
           ) : (
             <p>{error.message}</p>
           )}
@@ -183,7 +189,10 @@ export default function Plan() {
 
       {draft && (
         <section className="plan-card" aria-labelledby="draft-title">
-          <h2 id="draft-title">Draft plan <span className="badge">Not approved yet</span></h2>
+          <div className="panel-head">
+            <h2 id="draft-title">Proposed draft schedule</h2>
+            <span className="pill pill-warn">Pending approval</span>
+          </div>
           <PlanSummary data={draft} />
           {warnings.length > 0 && (
             <ul className="warnings">
@@ -191,12 +200,16 @@ export default function Plan() {
             </ul>
           )}
           <div className="btn-row">
-            <button type="button" className="btn btn-primary" disabled={busy}
-              onClick={() => (active ? setConfirming(true) : approve())}>
-              {busy ? 'Please wait...' : 'Approve plan'}
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy}
+              onClick={() => (active ? setConfirming(true) : approve())}
+            >
+              {busy ? 'Please wait...' : 'Approve & activate plan'}
             </button>
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={generate}>
-              Generate again
+              Regenerate draft
             </button>
           </div>
         </section>
@@ -204,11 +217,13 @@ export default function Plan() {
 
       {active && (
         <section className="plan-card" aria-labelledby="active-title">
-          <h2 id="active-title">
-            Your active plan{' '}
-            <span className="badge">Active &middot; v{active.plan.version ?? 1}</span>
-          </h2>
+          <div className="panel-head">
+            <h2 id="active-title">Active training plan</h2>
+            <span className="pill pill-ok">&checkmark; Active &middot; v{active.plan.version ?? 1}</span>
+          </div>
+
           <PlanSummary data={active} />
+
           {activeWarnings.length > 0 && (
             <ul className="warnings">
               {activeWarnings.map((w) => <li key={w}>{w}</li>)}
@@ -231,8 +246,8 @@ export default function Plan() {
                   <tbody>
                     {revisions.map((r) => (
                       <tr key={r.version}>
-                        <th scope="row">v{r.version}</th>
-                        <td>{formatTimestamp(r.created_at)}</td>
+                        <th scope="row" className="mono">v{r.version}</th>
+                        <td className="mono">{formatTimestamp(r.created_at)}</td>
                         <td className="wrap-cell">{r.summary}</td>
                       </tr>
                     ))}
@@ -252,22 +267,34 @@ export default function Plan() {
             >
               Rebuild remaining plan
             </button>
+            {!draft && (
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={generate}>
+                {busy ? 'Building draft...' : 'Generate new draft'}
+              </button>
+            )}
           </div>
         </section>
       )}
 
-      {!draft && !active && <p>You do not have a plan yet. Build one from your profile.</p>}
-
-      {!draft && (
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={generate}>
-          {busy ? 'Building your plan...' : active ? 'Create a new plan' : 'Generate my plan'}
-        </button>
+      {!draft && !active && (
+        <section className="plan-card">
+          <h2>No training plan yet</h2>
+          <p className="note">
+            Generate a deterministic training schedule tailored to your goal, race date, and available days.
+          </p>
+          <div className="btn-row">
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={generate}>
+              {busy ? 'Building your plan...' : 'Generate my plan'}
+            </button>
+            <Link className="btn btn-secondary" to="/profile">Review profile</Link>
+          </div>
+        </section>
       )}
 
       <ConfirmDialog
         open={confirming}
         title="Replace your current plan?"
-        message="Approving this draft archives your active plan. The runs you already logged are kept."
+        message="Approving this draft archives your active plan. All manual runs you already logged remain safe."
         confirmLabel="Approve"
         busy={busy}
         onConfirm={approve}

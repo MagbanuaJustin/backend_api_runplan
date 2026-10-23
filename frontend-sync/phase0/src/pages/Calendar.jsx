@@ -8,6 +8,12 @@ import {
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MARKS = { completed: '\u2713', skipped: '\u2715', missed: '!' }
+const STATUS_PILL = {
+  completed: 'pill-ok',
+  skipped: 'pill-warn',
+  missed: 'pill-danger',
+  planned: '',
+}
 
 const monthOf = (iso) => {
   const [y, m] = iso.split('-').map(Number)
@@ -18,9 +24,9 @@ const monthTitle = ({ y, m }) =>
   new Date(Date.UTC(y, m, 1)).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' })
 
 export default function Calendar() {
-  const [data, setData] = useState(null) // active plan or null
+  const [data, setData] = useState(null)
   const [runs, setRuns] = useState([])
-  const [state, setState] = useState('loading') // loading | ready | error
+  const [state, setState] = useState('loading')
   const [month, setMonth] = useState(null)
   const [selected, setSelected] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -119,8 +125,13 @@ export default function Calendar() {
     return (
       <>
         <h1>Calendar</h1>
-        <p>You do not have an active plan yet.</p>
-        <p><Link to="/plan">Create your plan</Link></p>
+        <section className="plan-card">
+          <h2>No active training plan</h2>
+          <p className="note">Generate and approve a plan first to view and reschedule workouts on your calendar.</p>
+          <div className="btn-row">
+            <Link className="btn btn-primary" to="/plan">Create your plan</Link>
+          </div>
+        </section>
       </>
     )
   }
@@ -144,140 +155,175 @@ export default function Calendar() {
   return (
     <>
       <h1>Calendar</h1>
-
-      <div className="cal-nav">
-        <button type="button" className="cal-btn" aria-label="Previous month"
-          disabled={monthIndex(month) <= monthIndex(monthOf(start_date))} onClick={() => shift(-1)}>
-          &lsaquo;
-        </button>
-        <h2 aria-live="polite">{monthTitle(month)}</h2>
-        <button type="button" className="cal-btn" aria-label="Next month"
-          disabled={monthIndex(month) >= monthIndex(monthOf(end_date))} onClick={() => shift(1)}>
-          &rsaquo;
-        </button>
-        <button type="button" className="cal-btn cal-today" onClick={goToday}>Today</button>
-      </div>
-
-      <div className="cal-head" aria-hidden="true">
-        {WEEKDAYS.map((d) => <span key={d}>{d}</span>)}
-      </div>
-      <div className="cal-grid">
-        {cells.map((date, i) => {
-          if (!date) return <span key={`e${i}`} className="day empty" />
-          const s = byDate.get(date)
-          const label = s
-            ? `${formatLongDate(date)}: ${TYPE_LABELS[s.type]}, ${s.planned_distance_km} km, ${STATUS_LABELS[s.status]}`
-            : `${formatLongDate(date)}: rest day`
-          return (
-            <button
-              key={date}
-              type="button"
-              className={`day status-${s?.status ?? 'none'}${date === today ? ' today' : ''}`}
-              aria-pressed={date === selected}
-              aria-current={date === today ? 'date' : undefined}
-              aria-label={label}
-              onClick={() => selectDay(date)}
-            >
-              <span className="day-num">{Number(date.slice(8))}</span>
-              {s && (
-                <span className="day-chip" aria-hidden="true">
-                  {TYPE_SHORT[s.type]} {s.planned_distance_km}
-                  {MARKS[s.status] ? ` ${MARKS[s.status]}` : ''}
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-      <p className="note">
-        E easy, L long, T tempo, I intervals, RACE race day. {MARKS.completed} done, {MARKS.skipped} skipped, ! missed.
-      </p>
-
       {notice && <p className="success" role="status">{notice}</p>}
 
-      <section className="plan-card" aria-labelledby="day-title" aria-live="polite">
-        <h2 id="day-title">{formatLongDate(selected)}</h2>
-        {!session ? (
-          <p>Rest day. No run planned.</p>
-        ) : (
-          <>
-            <p>
-              <strong>{TYPE_LABELS[session.type]}</strong>{' '}
-              <span className="badge">{STATUS_LABELS[session.status]}</span>
-            </p>
-            <dl className="stats">
-              <div><dt>Planned distance</dt><dd>{session.planned_distance_km} km</dd></div>
-              <div><dt>Estimated time</dt><dd>{formatDuration(session.planned_duration_seconds)}</dd></div>
-              <div><dt>Target pace</dt>
-                <dd>{paceLabel(session.planned_duration_seconds, session.planned_distance_km)}</dd></div>
-            </dl>
-            {session.notes && <p>{session.notes}</p>}
+      <div className="split-workspace">
+        <section className="plan-card" aria-label="Monthly schedule">
+          <div className="cal-nav">
+            <button
+              type="button"
+              className="cal-btn"
+              aria-label="Previous month"
+              disabled={monthIndex(month) <= monthIndex(monthOf(start_date))}
+              onClick={() => shift(-1)}
+            >
+              &lsaquo;
+            </button>
+            <h2 aria-live="polite">{monthTitle(month)}</h2>
+            <button
+              type="button"
+              className="cal-btn"
+              aria-label="Next month"
+              disabled={monthIndex(month) >= monthIndex(monthOf(end_date))}
+              onClick={() => shift(1)}
+            >
+              &rsaquo;
+            </button>
+            <button type="button" className="cal-btn cal-today" onClick={goToday}>Today</button>
+          </div>
 
-            {run && (
-              <p role="status">
-                <strong>You ran:</strong> {run.distance_km} km in {formatDuration(run.duration_seconds)} at{' '}
-                {run.pace_label} /km{run.effort ? `, effort ${run.effort}/10` : ''}.
-              </p>
-            )}
-
-            {error && <p className="error" role="alert">{error}</p>}
-
-            {session.status !== 'completed' && (
-              <div className="btn-row">
-                <Link className="btn btn-primary" to={`/activities?session=${session.id}`}>Log this run</Link>
-                {canMove && !moving && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    disabled={busy}
-                    onClick={() => {
-                      setMoving(true)
-                      setMoveDate(session.scheduled_date)
-                      setError('')
-                    }}
-                  >
-                    Move date
-                  </button>
-                )}
-                <button type="button" className="btn btn-secondary" disabled={busy}
-                  onClick={() => changeStatus(session, session.status === 'skipped' ? 'planned' : 'skipped')}>
-                  {session.status === 'skipped' ? 'Undo skip'
-                    : session.status === 'missed' ? 'Mark as skipped' : 'Skip this run'}
+          <div className="cal-head" aria-hidden="true">
+            {WEEKDAYS.map((d) => <span key={d}>{d}</span>)}
+          </div>
+          <div className="cal-grid">
+            {cells.map((date, i) => {
+              if (!date) return <span key={`e${i}`} className="day empty" />
+              const s = byDate.get(date)
+              const label = s
+                ? `${formatLongDate(date)}: ${TYPE_LABELS[s.type]}, ${s.planned_distance_km} km, ${STATUS_LABELS[s.status]}`
+                : `${formatLongDate(date)}: rest day`
+              return (
+                <button
+                  key={date}
+                  type="button"
+                  className={`day status-${s?.status ?? 'none'}${date === today ? ' today' : ''}`}
+                  aria-pressed={date === selected}
+                  aria-current={date === today ? 'date' : undefined}
+                  aria-label={label}
+                  onClick={() => selectDay(date)}
+                >
+                  <span className="day-num">{Number(date.slice(8))}</span>
+                  {s && (
+                    <span className="day-chip" aria-hidden="true">
+                      {TYPE_SHORT[s.type]} {s.planned_distance_km}
+                      {MARKS[s.status] ? ` ${MARKS[s.status]}` : ''}
+                    </span>
+                  )}
                 </button>
-              </div>
-            )}
+              )
+            })}
+          </div>
+          <p className="note" style={{ marginBottom: 0, marginTop: 12 }}>
+            E easy &middot; L long &middot; T tempo &middot; I intervals &middot; RACE race day &nbsp;|&nbsp;
+            {MARKS.completed} done &middot; {MARKS.skipped} skipped &middot; ! missed
+          </p>
+        </section>
 
-            {canMove && moving && (
-              <form className="inline-reschedule" onSubmit={(e) => submitMove(e, session)}>
-                <label className="field" htmlFor="move-date">
-                  <span>Move this run to an open day ({start_date} to {end_date})</span>
-                  <input
-                    id="move-date"
-                    type="date"
-                    min={start_date}
-                    max={end_date}
-                    value={moveDate}
-                    onChange={(e) => setMoveDate(e.target.value)}
-                  />
-                </label>
+        <section className="plan-card" aria-labelledby="day-title" aria-live="polite">
+          <div className="panel-head">
+            <h2 id="day-title">{formatLongDate(selected)}</h2>
+            {session && (
+              <span className={`pill ${STATUS_PILL[session.status] ?? ''}`}>
+                {STATUS_LABELS[session.status]}
+              </span>
+            )}
+          </div>
+
+          {!session ? (
+            <p className="note">Rest day — no scheduled workout on this date.</p>
+          ) : (
+            <>
+              <p style={{ margin: '0 0 12px', fontWeight: 600, fontSize: 15 }}>
+                {TYPE_LABELS[session.type]}
+              </p>
+
+              <dl className="stats">
+                <div><dt>Planned Distance</dt><dd>{session.planned_distance_km} km</dd></div>
+                <div><dt>Estimated Time</dt><dd>{formatDuration(session.planned_duration_seconds)}</dd></div>
+                <div>
+                  <dt>Target Pace</dt>
+                  <dd>{paceLabel(session.planned_duration_seconds, session.planned_distance_km)}</dd>
+                </div>
+              </dl>
+
+              {session.notes && <p className="note">{session.notes}</p>}
+
+              {run && (
+                <div className="success" role="status" style={{ marginBottom: 0 }}>
+                  <strong>Logged run:</strong>{' '}
+                  <span className="mono">
+                    {run.distance_km} km in {formatDuration(run.duration_seconds)} ({run.pace_label} /km)
+                  </span>
+                  {run.effort ? ` · Effort ${run.effort}/10` : ''}
+                </div>
+              )}
+
+              {error && <p className="error" role="alert">{error}</p>}
+
+              {session.status !== 'completed' && (
                 <div className="btn-row">
-                  <button type="submit" className="btn btn-primary" disabled={busy}>
-                    {busy ? 'Moving...' : 'Save new date'}
-                  </button>
+                  <Link className="btn btn-primary" to={`/activities?session=${session.id}`}>Log this run</Link>
+                  {canMove && !moving && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={busy}
+                      onClick={() => {
+                        setMoving(true)
+                        setMoveDate(session.scheduled_date)
+                        setError('')
+                      }}
+                    >
+                      Move date
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn btn-secondary"
                     disabled={busy}
-                    onClick={() => { setMoving(false); setError('') }}
+                    onClick={() => changeStatus(session, session.status === 'skipped' ? 'planned' : 'skipped')}
                   >
-                    Cancel
+                    {session.status === 'skipped'
+                      ? 'Undo skip'
+                      : session.status === 'missed'
+                        ? 'Mark as skipped'
+                        : 'Skip run'}
                   </button>
                 </div>
-              </form>
-            )}
-          </>
-        )}
-      </section>
+              )}
+
+              {canMove && moving && (
+                <form className="inline-reschedule" onSubmit={(e) => submitMove(e, session)}>
+                  <label className="field" htmlFor="move-date">
+                    <span>Move workout to an open date ({start_date} to {end_date})</span>
+                    <input
+                      id="move-date"
+                      type="date"
+                      min={start_date}
+                      max={end_date}
+                      value={moveDate}
+                      onChange={(e) => setMoveDate(e.target.value)}
+                    />
+                  </label>
+                  <div className="btn-row">
+                    <button type="submit" className="btn btn-primary" disabled={busy}>
+                      {busy ? 'Moving...' : 'Save new date'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={busy}
+                      onClick={() => { setMoving(false); setError('') }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+            </>
+          )}
+        </section>
+      </div>
     </>
   )
 }

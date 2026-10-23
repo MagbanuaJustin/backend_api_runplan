@@ -32,32 +32,47 @@ export default function Status() {
   if (state === 'error') return <p role="alert">Could not load system status.</p>
 
   const providers = integrations?.providers ?? {}
+  const apiConnected = health?.status === 'ok'
 
   return (
     <>
       <h1>System status</h1>
-      <p className="note">
-        Core training plans, session rescheduling, manual run logging, and analytics run
-        independently of external integrations.
-      </p>
 
-      <section className="plan-card" aria-labelledby="core-title">
-        <h2 id="core-title">
-          Core platform <span className="badge">{integrations?.core_enabled ? 'Active' : 'Offline'}</span>
-        </h2>
-        <dl className="stats">
-          <div><dt>API health</dt><dd>{health?.status === 'ok' ? 'Connected' : 'Degraded'}</dd></div>
-          <div><dt>Signed in as</dt><dd>{user?.email}</dd></div>
-          <div><dt>Role</dt><dd>{user?.role ?? 'runner'}</dd></div>
-          <div><dt>Analytics boundary</dt><dd>Manual runs only</dd></div>
-        </dl>
+      <section className="status-strip" aria-label="Core service health">
+        <div className="strip-item">
+          <span className="strip-label">API server</span>
+          <span className="strip-value">
+            <span className={`dot ${apiConnected ? 'dot-ok' : 'dot-warn'}`} />
+            {apiConnected ? 'Connected' : 'Degraded'}
+          </span>
+        </div>
+        <div className="strip-item">
+          <span className="strip-label">Core planner</span>
+          <span className="strip-value">
+            <span className={`dot ${integrations?.core_enabled ? 'dot-blue' : ''}`} />
+            {integrations?.core_enabled ? 'Active' : 'Offline'}
+          </span>
+        </div>
+        <div className="strip-item">
+          <span className="strip-label">Analytics boundary</span>
+          <span className="strip-value">Manual runs only</span>
+        </div>
+        <div className="strip-item">
+          <span className="strip-label">Operator / Runner</span>
+          <span className="strip-value mono">{user?.email}</span>
+        </div>
       </section>
 
       <section className="plan-card" aria-labelledby="providers-title">
-        <h2 id="providers-title">External integrations</h2>
+        <div className="panel-head">
+          <h2 id="providers-title">External integration modules</h2>
+          <span className="pill pill-muted">Stage B deferred</span>
+        </div>
         <p className="note">
-          External providers are deferred until all core first-party workflows are verified.
+          Core training plans, session rescheduling, manual run logging, and analytics operate independently
+          even when every external provider is disabled.
         </p>
+
         <div className="table-wrap">
           <table>
             <caption className="sr-only">Readiness of external integration modules</caption>
@@ -70,17 +85,24 @@ export default function Status() {
             <tbody>
               {Object.entries(PROVIDER_LABELS).map(([key, label]) => {
                 const p = providers[key]
-                const statusLabel = key === 'strava'
-                  ? 'Excluded (policy gate)'
-                  : p?.ready
-                    ? 'Ready'
-                    : p?.configured
-                      ? 'Configured (disabled)'
-                      : 'Deferred (off)'
+                let pillClass = 'pill-muted'
+                let statusText = '\u2014 Deferred (off)'
+
+                if (key === 'strava') {
+                  pillClass = 'pill-muted'
+                  statusText = '\u2014 Excluded (policy gate)'
+                } else if (p?.ready) {
+                  pillClass = 'pill-ok'
+                  statusText = '\u2713 Ready'
+                } else if (p?.configured) {
+                  pillClass = 'pill-warn'
+                  statusText = '\u2022 Configured (disabled)'
+                }
+
                 return (
                   <tr key={key}>
                     <th scope="row" className="wrap-cell">{label}</th>
-                    <td><span className="badge">{statusLabel}</span></td>
+                    <td><span className={`pill ${pillClass}`}>{statusText}</span></td>
                   </tr>
                 )
               })}
