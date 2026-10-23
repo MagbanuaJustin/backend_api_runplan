@@ -102,6 +102,9 @@ class RpSqliteDb
                 preferred_time TEXT DEFAULT NULL,
                 baseline_distance_km REAL DEFAULT NULL,
                 baseline_pace INTEGER DEFAULT NULL,
+                location_label TEXT DEFAULT NULL,
+                latitude REAL DEFAULT NULL,
+                longitude REAL DEFAULT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
@@ -754,3 +757,70 @@ test('phase3: coaching review degrades to an unsaved answer when the AI tables a
     assert_same(null, $coaching->latest_feedback_for_user(55), 'no stored review behind a missing table');
 });
 
+
+// ---------------------------------------------------------------------
+// Phase 4 - optional training location on the runner profile
+// ---------------------------------------------------------------------
+test('phase4: profile location is validated, saved, and never wiped by an older form', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    $db = rp_use_sqlite();
+    $profiles = new ProfileModel();
+
+    $base = array(
+        'display_name'   => 'Weather Tester',
+        'experience'     => 'intermediate',
+        'goal'           => 'general_fitness',
+        'available_days' => array('mon', 'wed', 'sat'),
+        'preferred_time' => 'morning',
+    );
+
+    // 1. A label alone is accepted (the geocoder resolves it later).
+    list($clean, $errors) = $profiles->validate($base + array('location_label' => '  Mamburao,   PH '));
+    assert_same(array(), $errors);
+    assert_same('Mamburao, PH', $clean['location_label'], 'label is trimmed and inner spaces collapsed');
+    assert_same(null, $clean['latitude'], 'no coordinates requested means none stored');
+
+    // 2. Half a coordinate is a typo, not a location.
+    list(, $errors) = $profiles->validate($base + array('latitude' => 13.22));
+    assert_same('Enter both latitude and longitude, or leave both empty.', $errors['longitude']);
+
+    // 3. Out of range numbers are refused with the real range.
+    list(, $errors) = $profiles->validate($base + array('latitude' => 91, 'longitude' => 300));
+    assert_contains('-90 and 90', $errors['latitude']);
+    assert_contains('-180 and 180', $errors['longitude']);
+
+    // 4. A form that predates weather support sends no location keys at all.
+    list($clean, $errors) = $profiles->validate($base);
+    assert_same(array(), $errors);
+    assert_false(array_key_exists('location_label', $clean), 'untouched location must stay untouched');
+
+    // 5. Saving a location, then saving the old form again, keeps it.
+    $profiles->save_for_user(71, $profiles->validate($base + array(
+        'location_label' => 'Mamburao, PH',
+        'latitude'       => 13.2233,
+        'longitude'      => 120.5956,
+    ))[0]);
+
+    $saved = $profiles->find_for_user(71);
+    assert_same('Mamburao, PH', $saved['location']['label']);
+    assert_true($saved['location']['has_coordinates']);
+    assert_same(13.2233, $saved['location']['latitude']);
+    assert_same('13.22330,120.59560', $saved['location']['query'], 'coordinates win over the label');
+
+    $profiles->save_for_user(71, $profiles->validate($base)[0]);
+    $unchanged = $profiles->find_for_user(71);
+    assert_same('Mamburao, PH', $unchanged['location']['label'], 'an older form must not erase the location');
+
+    // 6. Clearing is explicit and works when the client asks for it.
+    $profiles->save_for_user(71, $profiles->validate($base + array(
+        'location_label' => '',
+        'latitude'       => '',
+        'longitude'      => '',
+    ))[0]);
+    $cleared = $profiles->find_for_user(71);
+    assert_same(null, $cleared['location']['label']);
+    assert_same(false, $cleared['location']['has_coordinates']);
+    assert_same('', $cleared['location']['query'], 'nothing to query when no location is set');
+});
