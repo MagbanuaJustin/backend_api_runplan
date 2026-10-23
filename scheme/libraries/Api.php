@@ -373,6 +373,14 @@ class Api
      */
     public function respond($data, $code = 200)
     {
+        // A JSON API must not emit anything outside the envelope. Any notice,
+        // warning or debug echo printed earlier would corrupt the body, and the
+        // SPA would report "the server sent an unexpected reply". public/index.php
+        // opens this buffer for /api/* requests; closing it here drops the junk.
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
         http_response_code($code);
         echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         exit;

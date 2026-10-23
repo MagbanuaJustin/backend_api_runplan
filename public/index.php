@@ -124,6 +124,12 @@ if (!function_exists('rp_is_api_request')) {
 
 if (!function_exists('rp_send_api_json_error')) {
     function rp_send_api_json_error($status_code, $public_message, $dev_detail = null) {
+        // Drop anything already printed (a notice, a deprecation banner, half a
+        // stack trace) so the client receives one parseable JSON document.
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
         if (!headers_sent()) {
             $origin  = $_SERVER['HTTP_ORIGIN'] ?? '';
             $allowed = array_filter(array_map('trim', explode(',', env('CORS_ORIGINS', 'http://localhost:5173'))));
@@ -193,6 +199,19 @@ if (!function_exists('_error_handler')) {
         }
         return true;
     }
+}
+
+/*
+ * Buffer /api/* output for the whole request.
+ *
+ * Why: one notice printed before the JSON body makes json_decode() fail on the
+ * client, which then reports "The server sent an unexpected reply (status 200)"
+ * instead of naming the real problem. With the buffer in place every response
+ * path - Api::respond(), the handlers above, even a fatal error caught in the
+ * shutdown handler - can discard the stray bytes and emit clean JSON.
+ */
+if (rp_is_api_request() && ob_get_level() === 0) {
+    ob_start();
 }
 
 /*
