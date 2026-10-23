@@ -18,6 +18,7 @@ export default function Login() {
   }, [])
 
   const from = location.state?.from?.pathname ?? '/dashboard'
+  const notice = location.state?.notice ?? ''
 
   if (status === 'in') return <Navigate to={from} replace />
 
@@ -74,6 +75,8 @@ export default function Login() {
           <h1>Sign in</h1>
           <p className="auth-subtitle">Enter your runner account to open your training dashboard.</p>
 
+          {notice && <p className="success" role="status">{notice}</p>}
+
           <form className="form" onSubmit={handleSubmit} noValidate>
             <div className="field">
               <label htmlFor="email">Email</label>
@@ -88,7 +91,12 @@ export default function Login() {
             </div>
 
             <div className="field">
-              <label htmlFor="password">Password</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <label htmlFor="password">Password</label>
+                <Link to="/forgot-password" style={{ fontSize: '12px', fontWeight: 600 }}>
+                  Forgot password?
+                </Link>
+              </div>
               <div className="pw-wrap">
                 <input
                   id="password"

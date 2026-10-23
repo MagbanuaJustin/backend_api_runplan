@@ -11,6 +11,8 @@
 
 require_once RP_ROOT . 'app/models/UserModel.php';
 require_once RP_ROOT . 'app/models/RefreshTokenModel.php';
+require_once RP_ROOT . 'app/models/PasswordResetModel.php';
+require_once RP_ROOT . 'app/models/SecurityEventModel.php';
 require_once RP_ROOT . 'app/models/ActivityModel.php';
 require_once RP_ROOT . 'app/models/DashboardModel.php';
 require_once RP_ROOT . 'app/models/SessionModel.php';
@@ -25,8 +27,10 @@ class RpSqliteDb
 {
     public $pdo;
     private $table_name = '';
+    private $columns_sql = '*';
     private $wheres = array();
     private $order = '';
+    private $limit_sql = '';
 
     public function __construct()
     {
@@ -100,6 +104,30 @@ class RpSqliteDb
                 scheduled_at TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending'
             );
+            CREATE TABLE password_reset_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                expires_at TEXT NOT NULL,
+                used_at TEXT DEFAULT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE account_deletion_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER DEFAULT NULL,
+                email_sha256 TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'completed',
+                reason TEXT DEFAULT NULL,
+                requested_at TEXT NOT NULL,
+                completed_at TEXT DEFAULT NULL
+            );
+            CREATE TABLE auth_security_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER DEFAULT NULL,
+                event_type TEXT NOT NULL,
+                safe_metadata TEXT DEFAULT NULL,
+                created_at TEXT NOT NULL
+            );
         ");
     }
 
@@ -118,9 +146,17 @@ class RpSqliteDb
 
     public function table($name)
     {
-        $this->table_name = $name;
-        $this->wheres = array();
-        $this->order = '';
+        $this->table_name  = $name;
+        $this->columns_sql = '*';
+        $this->wheres      = array();
+        $this->order       = '';
+        $this->limit_sql   = '';
+        return $this;
+    }
+
+    public function select($cols)
+    {
+        $this->columns_sql = $cols;
         return $this;
     }
 
@@ -136,6 +172,12 @@ class RpSqliteDb
         return $this;
     }
 
+    public function limit($n)
+    {
+        $this->limit_sql = ' LIMIT ' . (int) $n;
+        return $this;
+    }
+
     public function get()
     {
         list($sql, $args) = $this->select_sql(' LIMIT 1');
@@ -145,7 +187,7 @@ class RpSqliteDb
 
     public function get_all()
     {
-        list($sql, $args) = $this->select_sql('');
+        list($sql, $args) = $this->select_sql($this->limit_sql);
         return $this->raw($sql, $args)->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -174,7 +216,7 @@ class RpSqliteDb
     private function select_sql($suffix)
     {
         list($where_sql, $args) = $this->where_clause();
-        return array("SELECT * FROM {$this->table_name}{$where_sql}{$this->order}{$suffix}", $args);
+        return array("SELECT {$this->columns_sql} FROM {$this->table_name}{$where_sql}{$this->order}{$suffix}", $args);
     }
 
     private function where_clause()
@@ -329,6 +371,8 @@ test('phase0: protected API routes attach auth middleware and OPTIONS preflight 
         '/api/auth/login',
         '/api/auth/refresh',
         '/api/auth/logout',
+        '/api/auth/forgot-password',
+        '/api/auth/reset-password',
     );
 
     preg_match_all('/^\$router->(get|post|put|patch|delete)\(\'([^\']+)\',[^\n]+$/m', $routes, $lines, PREG_SET_ORDER);
@@ -372,3 +416,73 @@ test('phase0: HttpClient::fake records outbound JSON requests without network I/
         HttpClient::stop_faking();
     }
 });
+
+// ---------------------------------------------------------------------
+// 5. Phase 1 account recovery, security event redaction & deletion
+// ---------------------------------------------------------------------
+test('phase1: PasswordResetModel enforces HMAC hashing, latest-only issue, and single-use consume', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    $db     = rp_use_sqlite();
+    $users  = new UserModel();
+    $resets = new PasswordResetModel();
+
+    $user   = $users->create_password_account('recover@example.com', 'initial-pass-99');
+    $uid    = (int) $user['id'];
+
+    $first  = $resets->issue($uid);
+    $second = $resets->issue($uid);
+
+    // Raw token must never appear in the DB
+    $stored = $db->raw('SELECT token_hash FROM password_reset_tokens')->fetchAll(PDO::FETCH_COLUMN);
+    assert_false(in_array($second['token'], $stored, true), 'raw reset token must never be stored');
+
+    // Issuing a second token invalidates the first
+    assert_same(null, $resets->find_valid($first['token']), 'superseded token must not validate');
+    assert_true(is_array($resets->find_valid($second['token'])), 'latest token validates');
+
+    // Consuming succeeds once and rejects replay
+    $consumed = $resets->consume($second['token']);
+    assert_same($uid, (int) $consumed['user_id']);
+    assert_same(null, $resets->consume($second['token']), 'consumed token cannot be replayed');
+});
+
+test('phase1: SecurityEventModel redacts secrets and UserModel::delete_account_and_data records receipt', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    $db     = rp_use_sqlite();
+    $users  = new UserModel();
+    $events = new SecurityEventModel();
+
+    $user = $users->create_password_account('delete-me@example.com', 'goodbye-pass-88');
+    $uid  = (int) $user['id'];
+
+    assert_true($users->verify_password($user, 'goodbye-pass-88'));
+    assert_false($users->verify_password($user, 'wrong-pass-88'));
+
+    $events->record('password_changed', $uid, array(
+        'revoked_sessions' => 2,
+        'password'         => 'SHOULD_BE_REDACTED',
+        'email'            => 'delete-me@example.com',
+    ));
+
+    $recent = $events->recent_for_user($uid, 5);
+    assert_count(1, $recent);
+    assert_same('password_changed', $recent[0]['event_type']);
+    assert_same(array('revoked_sessions' => 2), $recent[0]['metadata']);
+
+    $summary = $users->account_summary($uid);
+    assert_same('delete-me@example.com', $summary['email']);
+    assert_same(0, $summary['data_counts']['activities']);
+
+    assert_true($users->delete_account_and_data($uid, 'Finished marathon block'));
+    assert_same(false, $users->find($uid), 'user row must be removed');
+
+    $receipt = $db->raw('SELECT * FROM account_deletion_requests LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+    assert_same('completed', $receipt['status']);
+    assert_same('Finished marathon block', $receipt['reason']);
+    assert_same(hash('sha256', 'delete-me@example.com'), $receipt['email_sha256']);
+});
+

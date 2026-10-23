@@ -4,9 +4,9 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 /**
  * Controller: Auth
  *
- * Core first-party email/password authentication and rotating HttpOnly refresh
- * sessions. All persistence and validation rules live in UserModel and
- * RefreshTokenModel (zero controller-level SQL).
+ * Core first-party email/password authentication, password recovery, and
+ * rotating HttpOnly refresh sessions. All persistence and validation rules
+ * live in Models (zero controller-level SQL).
  */
 class Auth extends Controller {
 
@@ -15,6 +15,7 @@ class Auth extends Controller {
         $this->call->library('api');
         $this->call->database();
         $this->call->model('UserModel');
+        $this->call->model('SecurityEventModel');
 
         $this->api->require_method('POST');
         $this->api->rate_limit('register_' . ($_SERVER['REMOTE_ADDR'] ?? 'x'), 5, 600);
@@ -39,6 +40,8 @@ class Auth extends Controller {
             $this->api->respond_error('That email is already registered.', 409);
         }
 
+        $this->SecurityEventModel->record('account_registered', (int) $user['id'], ['method' => 'password']);
+
         $this->api->respond([
             'data' => [
                 'id'    => (int) $user['id'],
@@ -53,6 +56,7 @@ class Auth extends Controller {
         $this->call->library('api');
         $this->call->database();
         $this->call->model('UserModel');
+        $this->call->model('SecurityEventModel');
 
         $this->api->require_method('POST');
         $ip = $_SERVER['REMOTE_ADDR'] ?? 'x';
@@ -70,13 +74,122 @@ class Auth extends Controller {
 
         $user = $this->UserModel->authenticate($email, $password);
         if (!$user) {
+            $this->SecurityEventModel->record('login_failed', null, ['reason' => 'invalid_credentials']);
             $this->api->respond_error('Invalid email or password.', 401);
         }
         if (!$this->UserModel->is_active($user)) {
+            $this->SecurityEventModel->record('login_blocked', (int) $user['id'], ['reason' => 'inactive']);
             $this->api->respond_error('This account is not active.', 403);
         }
 
+        $this->SecurityEventModel->record('login_succeeded', (int) $user['id'], ['method' => 'password']);
         $this->start_session($user);
+    }
+
+    public function forgot_password()
+    {
+        $this->call->library('api');
+        $this->call->database();
+        $this->call->model('UserModel');
+        $this->call->model('PasswordResetModel');
+        $this->call->model('SecurityEventModel');
+
+        $this->api->require_method('POST');
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'x';
+        $this->api->rate_limit('forgot_' . $ip, 8, 600);
+
+        $input = $this->read_json();
+        $email = UserModel::normalise_email($input['email'] ?? '');
+
+        if ($problem = UserModel::email_problem($email)) {
+            $this->api->respond(['error' => 'Validation failed', 'fields' => ['email' => $problem]], 422);
+        }
+
+        $this->api->rate_limit('forgot_email_' . md5($email), 5, 600);
+
+        // Anti-enumeration: identical neutral message regardless of account existence
+        $data = [
+            'ok'      => true,
+            'message' => 'If an account matches that email, password reset instructions have been generated.',
+        ];
+
+        $user = $this->UserModel->find_by_email($email);
+        if ($user && $this->UserModel->is_active($user)) {
+            $issued = $this->PasswordResetModel->issue((int) $user['id']);
+            $this->SecurityEventModel->record('password_reset_requested', (int) $user['id'], [
+                'ttl_minutes' => $issued['ttl_minutes'],
+            ]);
+
+            if (env('APP_ENV', 'development') === 'development' && env('PASSWORD_RESET_DEV_PREVIEW', 'true') === 'true') {
+                $data['dev_reset'] = [
+                    'token'              => $issued['token'],
+                    'reset_path'         => '/reset-password?token=' . rawurlencode($issued['token']),
+                    'expires_at_utc'     => $issued['expires_at'],
+                    'expires_in_minutes' => $issued['ttl_minutes'],
+                ];
+            }
+        } else {
+            hash_hmac('sha256', random_bytes(32), 'timing-pad');
+        }
+
+        header('Cache-Control: no-store');
+        $this->api->respond(['data' => $data]);
+    }
+
+    public function reset_password()
+    {
+        $this->call->library('api');
+        $this->call->database();
+        $this->call->model('UserModel');
+        $this->call->model('PasswordResetModel');
+        $this->call->model('RefreshTokenModel');
+        $this->call->model('SecurityEventModel');
+
+        $this->api->require_method('POST');
+        $this->api->rate_limit('reset_' . ($_SERVER['REMOTE_ADDR'] ?? 'x'), 10, 600);
+
+        $input    = $this->read_json();
+        $token    = trim((string) ($input['token'] ?? ''));
+        $password = (string) ($input['password'] ?? '');
+
+        $errors = [];
+        if ($token === '') {
+            $errors['token'] = 'A password reset token is required.';
+        }
+        if ($problem = UserModel::password_problem($password)) {
+            $errors['password'] = $problem;
+        }
+        if ($errors) {
+            $this->api->respond(['error' => 'Validation failed', 'fields' => $errors], 422);
+        }
+
+        $consumed = $this->PasswordResetModel->consume($token);
+        if (!$consumed) {
+            $this->SecurityEventModel->record('password_reset_failed', null, ['reason' => 'invalid_or_expired']);
+            $this->api->respond_error('That reset link is invalid or has expired. Request a new one.', 400);
+        }
+
+        $uid  = (int) $consumed['user_id'];
+        $user = $this->UserModel->find_active($uid);
+        if (!$user) {
+            $this->api->respond_error('This account is not active.', 403);
+        }
+
+        $this->UserModel->set_password($uid, $password);
+        $revoked = $this->RefreshTokenModel->revoke_all_for_user($uid);
+        $this->clear_refresh_cookie();
+
+        $this->SecurityEventModel->record('password_reset_completed', $uid, [
+            'revoked_sessions' => $revoked,
+        ]);
+
+        header('Cache-Control: no-store');
+        $this->api->respond([
+            'data' => [
+                'ok'      => true,
+                'message' => 'Your password has been updated. Sign in with your new password.',
+            ],
+        ]);
     }
 
     public function refresh()

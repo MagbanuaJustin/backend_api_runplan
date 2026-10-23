@@ -20,14 +20,21 @@ $router->get('/api/health', 'Health::index');
 $router->options('/api/{a?}/{b?}/{c?}/{d?}', 'Health::preflight');
 $router->get('/migrate/run', 'Migrate::run');
 
-// Public auth endpoints (cookie/credentials bootstrap)
+// Public auth endpoints (cookie/credentials bootstrap & password recovery)
 $router->post('/api/auth/register', 'Auth::register');
 $router->post('/api/auth/login', 'Auth::login');
 $router->post('/api/auth/refresh', 'Auth::refresh');
 $router->post('/api/auth/logout', 'Auth::logout');
+$router->post('/api/auth/forgot-password', 'Auth::forgot_password');
+$router->post('/api/auth/reset-password', 'Auth::reset_password');
 
 // Protected endpoints (AuthMiddleware gate + controller require_jwt() defense-in-depth)
 $router->get('/api/auth/me', 'Auth::me')->middleware('auth');
+
+$router->get('/api/account', 'Account::show')->middleware('auth');
+$router->post('/api/account/password', 'Account::change_password')->middleware('auth');
+$router->delete('/api/account', 'Account::destroy')->middleware('auth');
+$router->post('/api/account/delete', 'Account::destroy')->middleware('auth');
 
 $router->get('/api/activities', 'Activities::index')->middleware('auth');
 $router->get('/api/activities/{id}', 'Activities::show')->middleware('auth');

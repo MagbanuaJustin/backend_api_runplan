@@ -75,6 +75,15 @@ class UserModel extends Model {
         return is_array($user) && !empty($user['password_hash']);
     }
 
+    public function verify_password($user, $password)
+    {
+        if ($this->has_password($user)) {
+            return password_verify((string) $password, $user['password_hash']);
+        }
+        password_hash((string) $password, PASSWORD_DEFAULT); // equalise cost
+        return false;
+    }
+
     // ------------------------------------------------------------------
     // Writes
     // ------------------------------------------------------------------
@@ -138,6 +147,97 @@ class UserModel extends Model {
             [password_hash($password, PASSWORD_DEFAULT), (int) $user_id]
         );
         return true;
+    }
+
+    /**
+     * Build a safe overview of the user's account and stored first-party data
+     * counts for GET /api/account.
+     */
+    public function account_summary($user_id)
+    {
+        $uid  = (int) $user_id;
+        $user = $this->find_active($uid);
+        if (!$user) {
+            return null;
+        }
+
+        $plans = (int) $this->db->raw(
+            'SELECT COUNT(*) FROM training_plans WHERE user_id = ?',
+            [$uid]
+        )->fetchColumn();
+
+        $sessions = (int) $this->db->raw(
+            'SELECT COUNT(*) FROM training_sessions WHERE user_id = ?',
+            [$uid]
+        )->fetchColumn();
+
+        $activities = (int) $this->db->raw(
+            'SELECT COUNT(*) FROM activities WHERE user_id = ?',
+            [$uid]
+        )->fetchColumn();
+
+        $summary = $this->present($user);
+        $summary['status']     = (string) ($user['status'] ?? 'active');
+        $summary['created_at'] = $user['created_at'] ?? null;
+        $summary['updated_at'] = $user['updated_at'] ?? null;
+        $summary['data_counts'] = [
+            'plans'      => $plans,
+            'sessions'   => $sessions,
+            'activities' => $activities,
+        ];
+
+        return $summary;
+    }
+
+    /**
+     * Permanently delete a runner's account and cascade-remove all first-party
+     * training data while recording a non-PII deletion receipt.
+     *
+     * @param int         $user_id
+     * @param string|null $reason
+     * @return bool
+     */
+    public function delete_account_and_data($user_id, $reason = null)
+    {
+        $uid  = (int) $user_id;
+        $user = $this->find($uid);
+        if (!$user) {
+            return false;
+        }
+
+        $clean_reason = null;
+        if ($reason !== null && trim((string) $reason) !== '') {
+            $clean_reason = mb_substr(trim((string) $reason), 0, 255);
+        }
+
+        $now_utc      = gmdate('Y-m-d H:i:s');
+        $email_sha256 = hash('sha256', self::normalise_email($user['email']));
+
+        $this->db->transaction();
+        try {
+            $this->db->table('account_deletion_requests')->insert([
+                'user_id'      => $uid,
+                'email_sha256' => $email_sha256,
+                'status'       => 'completed',
+                'reason'       => $clean_reason,
+                'requested_at' => $now_utc,
+                'completed_at' => $now_utc,
+            ]);
+
+            // Explicit token cleanup (defense-in-depth alongside FK ON DELETE CASCADE)
+            $this->db->raw('DELETE FROM refresh_tokens WHERE user_id = ?', [$uid]);
+            $this->db->raw('DELETE FROM password_reset_tokens WHERE user_id = ?', [$uid]);
+
+            // Cascades to runner_profiles, training_plans, training_sessions,
+            // activities, plan_revisions, etc., and sets user_id = NULL on audit tables.
+            $this->db->raw('DELETE FROM users WHERE id = ?', [$uid]);
+
+            $this->db->commit();
+            return true;
+        } catch (Throwable $e) {
+            $this->db->roll_back();
+            throw $e;
+        }
     }
 
     // ------------------------------------------------------------------
