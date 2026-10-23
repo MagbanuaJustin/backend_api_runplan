@@ -111,6 +111,90 @@ if ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
     header('Strict-Transport-Security: max-age=31536000');
 }
 
+// ---- JSON error & exception handlers for /api/* routes ----
+// LavaLust's default debug handlers render HTML with HTTP 200 on uncaught
+// exceptions or PHP warnings/deprecations, which causes the React SPA client
+// to report "The server sent an unexpected reply (status 200)".
+if (!function_exists('rp_is_api_request')) {
+    function rp_is_api_request() {
+        $uri = (string) ($_SERVER['REQUEST_URI'] ?? $_SERVER['PHP_SELF'] ?? '');
+        return strpos($uri, '/api/') !== false || substr($uri, -4) === '/api';
+    }
+}
+
+if (!function_exists('rp_send_api_json_error')) {
+    function rp_send_api_json_error($status_code, $public_message, $dev_detail = null) {
+        if (!headers_sent()) {
+            $origin  = $_SERVER['HTTP_ORIGIN'] ?? '';
+            $allowed = array_filter(array_map('trim', explode(',', env('CORS_ORIGINS', 'http://localhost:5173'))));
+            if ($origin !== '' && in_array($origin, $allowed, true)) {
+                header('Access-Control-Allow-Origin: ' . $origin);
+                header('Access-Control-Allow-Credentials: true');
+            }
+            header('Content-Type: application/json; charset=UTF-8');
+            http_response_code((int) $status_code);
+        }
+
+        $is_dev  = strtolower(env('APP_ENV', 'development')) === 'development';
+        $message = ($is_dev && is_string($dev_detail) && $dev_detail !== '')
+            ? $dev_detail
+            : $public_message;
+
+        echo json_encode(array(
+            'error'  => $message,
+            'status' => (int) $status_code,
+        ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+}
+
+if (!function_exists('_exception_handler')) {
+    function _exception_handler($e) {
+        if (function_exists('config_item') && (config_item('log_threshold') == 1 || config_item('log_threshold') == 3)) {
+            $logger = load_class('logger', 'kernel');
+            $logger->log('error', get_class($e), $e->getMessage(), $e->getFile(), $e->getLine());
+        }
+        if (rp_is_api_request()) {
+            $detail = get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
+            rp_send_api_json_error(500, 'Internal server error. Please try again.', $detail);
+        }
+        if (function_exists('config_item') && strtolower((string) config_item('ENVIRONMENT')) === 'development') {
+            $exception = load_class('Errors', 'kernel');
+            $exception->show_exception($e);
+        }
+        http_response_code(500);
+        exit;
+    }
+}
+
+if (!function_exists('_error_handler')) {
+    function _error_handler($severity, $errstr, $errfile, $errline) {
+        // Respect @ suppression and ignore non-fatal deprecation notices (e.g. PHP 8.5)
+        if (!(error_reporting() & $severity)) {
+            return false;
+        }
+        if ($severity === E_DEPRECATED || $severity === E_USER_DEPRECATED) {
+            return true;
+        }
+
+        if (function_exists('config_item') && (config_item('log_threshold') == 1 || config_item('log_threshold') == 3)) {
+            $logger = load_class('logger', 'kernel');
+            $logger->log('error', (string) $severity, $errstr, $errfile, $errline);
+        }
+
+        if (rp_is_api_request()) {
+            $detail = 'PHP error: ' . $errstr . ' (' . basename($errfile) . ':' . $errline . ')';
+            rp_send_api_json_error(500, 'Internal server error. Please try again.', $detail);
+        }
+
+        if (function_exists('config_item') && strtolower((string) config_item('ENVIRONMENT')) === 'development') {
+            $error = load_class('Errors', 'kernel');
+            $error->show_php_error((string) $severity, $errstr, $errfile, $errline);
+        }
+        return true;
+    }
+}
+
 /*
  * ------------------------------------------------------
  * Setup done? Then Hurray!

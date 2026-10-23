@@ -18,17 +18,92 @@ class AiCoachingModel extends Model {
     protected $table       = 'ai_feedback';
     protected $primary_key = 'id';
 
+    /** @var bool|null true = tables verified, false = schema unusable */
+    private static $schema_ok = null;
+
+    /**
+     * Verifies (and, on a fresh or restored database, creates) the two AI
+     * audit tables before they are queried.
+     *
+     * Why this exists: the dashboard's coaching card is the only screen that
+     * touches `ai_feedback` / `ai_plan_requests`. On a deployment where
+     * migration 008 was never applied, that card used to take the whole card
+     * down with an opaque server error. Checking once per request is cheap and
+     * keeps the core dashboard working with no AI tables at all (NFR-04).
+     */
+    private function ensure_tables()
+    {
+        if (self::$schema_ok === true) {
+            return;
+        }
+
+        try {
+            $this->db->raw('SELECT 1 FROM ai_feedback LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+            $this->db->raw('SELECT 1 FROM ai_plan_requests LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+            self::$schema_ok = true;
+            return;
+        } catch (Throwable $e) {
+            self::$schema_ok = false;
+        }
+
+        // Mirrors migration 008. Every statement is CREATE TABLE IF NOT EXISTS,
+        // so re-running it on a healthy database is a no-op.
+        try {
+            $this->db->raw(
+                'CREATE TABLE IF NOT EXISTS ai_plan_requests (
+                    id INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+                    user_id INT(11) UNSIGNED NOT NULL,
+                    plan_id INT(11) UNSIGNED NULL DEFAULT NULL,
+                    provider VARCHAR(30) NOT NULL,
+                    status ENUM(\'pending\',\'succeeded\',\'failed\',\'fallback\') NOT NULL DEFAULT \'pending\',
+                    request_summary VARCHAR(500) NULL DEFAULT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    KEY user_created_idx (user_id, created_at),
+                    KEY plan_id_idx (plan_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+            $this->db->raw(
+                'CREATE TABLE IF NOT EXISTS ai_feedback (
+                    id INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+                    user_id INT(11) UNSIGNED NOT NULL,
+                    period_start DATE NOT NULL,
+                    period_end DATE NOT NULL,
+                    metrics_snapshot JSON NOT NULL,
+                    feedback_text TEXT NULL,
+                    provider_status VARCHAR(30) NOT NULL DEFAULT \'ok\',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY user_period_unique (user_id, period_start)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+
+            $this->db->raw('SELECT 1 FROM ai_feedback LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+            self::$schema_ok = true;
+        } catch (Throwable $e) {
+            // Non-MySQL driver or no CREATE privilege: callers degrade to an
+            // unsaved, in-memory coaching review instead of failing the page.
+            self::$schema_ok = false;
+        }
+    }
+
     public function latest_feedback_for_user($user_id)
     {
-        $row = $this->db->raw(
-            'SELECT id, period_start, period_end, metrics_snapshot,
-                    feedback_text, provider_status, created_at
-               FROM ai_feedback
-              WHERE user_id = ?
-              ORDER BY period_start DESC, id DESC
-              LIMIT 1',
-            array((int) $user_id)
-        )->fetch(PDO::FETCH_ASSOC);
+        $this->ensure_tables();
+
+        try {
+            $row = $this->db->raw(
+                'SELECT id, period_start, period_end, metrics_snapshot,
+                        feedback_text, provider_status, created_at
+                   FROM ai_feedback
+                  WHERE user_id = ?
+                  ORDER BY period_start DESC, id DESC
+                  LIMIT 1',
+                array((int) $user_id)
+            )->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            return null;
+        }
 
         return $row ? $this->present_feedback($row) : null;
     }
@@ -40,6 +115,8 @@ class AiCoachingModel extends Model {
      */
     public function generate_weekly_feedback($user_id, ?DateTimeImmutable $today = null, ?AnthropicService $service = null)
     {
+        $this->ensure_tables();
+
         $uid     = (int) $user_id;
         $ref     = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
         $client  = $service ?: new AnthropicService();
@@ -62,14 +139,56 @@ class AiCoachingModel extends Model {
             }
         }
 
-        return $this->save_feedback(
+        return $this->persist_or_degrade(
             $uid,
-            $metrics['period_start'],
-            $metrics['period_end'],
             $metrics,
             $text,
             $status
         );
+    }
+
+    /**
+     * Persists the review, or returns it unsaved (`persisted = false`) when the
+     * database cannot store it. A missing table must never turn a readable
+     * coaching card into "the server sent an unexpected reply".
+     */
+    private function persist_or_degrade($user_id, array $metrics, $text, $provider_status)
+    {
+        try {
+            return $this->save_feedback(
+                $user_id,
+                $metrics['period_start'],
+                $metrics['period_end'],
+                $metrics,
+                $text,
+                $provider_status
+            );
+        } catch (Throwable $e) {
+            return array(
+                'id'              => null,
+                'period_start'    => $metrics['period_start'],
+                'period_end'      => $metrics['period_end'],
+                'metrics'         => $metrics,
+                'feedback_text'   => $text,
+                'provider_status' => $provider_status,
+                'persisted'       => false,
+                'persist_error'   => $this->describe_error($e),
+                'created_at'      => gmdate('Y-m-d H:i:s'),
+            );
+        }
+    }
+
+    /**
+     * A short, non-secret reason for a failed write. Only surfaced while
+     * APP_ENV=development, because it can contain a table/column name.
+     */
+    private function describe_error(Throwable $e)
+    {
+        $env = function_exists('env') ? (string) env('APP_ENV', 'development') : 'development';
+        if (strtolower($env) !== 'development') {
+            return null;
+        }
+        return mb_substr(get_class($e) . ': ' . $e->getMessage(), 0, 240);
     }
 
     /**
@@ -134,14 +253,21 @@ class AiCoachingModel extends Model {
             }
         }
 
-        $this->db->table('ai_plan_requests')->insert(array(
-            'user_id'         => $uid,
-            'plan_id'         => $pid,
-            'provider'        => 'anthropic',
-            'status'          => $req_status,
-            'request_summary' => mb_substr($summary_line, 0, 500),
-            'created_at'      => gmdate('Y-m-d H:i:s'),
-        ));
+        $this->ensure_tables();
+
+        try {
+            $this->db->table('ai_plan_requests')->insert(array(
+                'user_id'         => $uid,
+                'plan_id'         => $pid,
+                'provider'        => 'anthropic',
+                'status'          => $req_status,
+                'request_summary' => mb_substr($summary_line, 0, 500),
+                'created_at'      => gmdate('Y-m-d H:i:s'),
+            ));
+        } catch (Throwable $e) {
+            // The audit row is diagnostic only: plan generation already
+            // succeeded and must not be rolled back by a logging failure.
+        }
 
         return array(
             'text'            => $brief_text,
@@ -215,20 +341,25 @@ class AiCoachingModel extends Model {
         $ref         = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
         $month_start = $ref->format('Y-m-01') . ' 00:00:00';
 
-        $plan_calls = (int) $this->db->raw(
-            "SELECT COUNT(*) FROM ai_plan_requests
-              WHERE provider = 'anthropic'
-                AND status IN ('succeeded', 'failed')
-                AND created_at >= ?",
-            array($month_start)
-        )->fetchColumn();
+        try {
+            $plan_calls = (int) $this->db->raw(
+                "SELECT COUNT(*) FROM ai_plan_requests
+                  WHERE provider = 'anthropic'
+                    AND status IN ('succeeded', 'failed')
+                    AND created_at >= ?",
+                array($month_start)
+            )->fetchColumn();
 
-        $feedback_calls = (int) $this->db->raw(
-            "SELECT COUNT(*) FROM ai_feedback
-              WHERE provider_status = 'ok'
-                AND created_at >= ?",
-            array($month_start)
-        )->fetchColumn();
+            $feedback_calls = (int) $this->db->raw(
+                "SELECT COUNT(*) FROM ai_feedback
+                  WHERE provider_status = 'ok'
+                    AND created_at >= ?",
+                array($month_start)
+            )->fetchColumn();
+        } catch (Throwable $e) {
+            // No readable audit tables means no recorded calls, not a failure.
+            return 0;
+        }
 
         return $plan_calls + $feedback_calls;
     }
@@ -288,6 +419,7 @@ class AiCoachingModel extends Model {
             'metrics'         => is_array($decoded) ? $decoded : array(),
             'feedback_text'   => $row['feedback_text'],
             'provider_status' => $row['provider_status'],
+            'persisted'       => true,
             'created_at'      => $row['created_at'],
         );
     }

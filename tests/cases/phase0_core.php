@@ -733,3 +733,24 @@ test('phase3: AiCoachingModel falls back cleanly when Anthropic is disabled, ove
 });
 
 
+
+test('phase3: coaching review degrades to an unsaved answer when the AI tables are missing', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    $db = rp_use_sqlite();
+    $db->raw('DROP TABLE ai_feedback');
+
+    $coaching = new AiCoachingModel();
+    $off_service = new AnthropicService(array('enabled' => false, 'api_key' => ''));
+
+    // A deployment that never applied migration 008 must still render a review
+    // instead of failing the whole dashboard card (NFR-04).
+    $res = $coaching->generate_weekly_feedback(55, rp_today(), $off_service);
+    assert_same(false, $res['persisted']);
+    assert_same(null, $res['id']);
+    assert_true(strlen((string) $res['feedback_text']) > 20);
+
+    assert_same(null, $coaching->latest_feedback_for_user(55), 'no stored review behind a missing table');
+});
+

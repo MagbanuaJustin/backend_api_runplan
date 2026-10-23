@@ -486,6 +486,14 @@ export default function Dashboard() {
             <p style={{ margin: '0 0 12px', whiteSpace: 'pre-line', lineHeight: 1.6 }}>
               {feedback.feedback_text}
             </p>
+
+            {feedback.persisted === false && (
+              <p className="note" style={{ color: 'var(--warning)' }}>
+                This review was generated but could not be saved to your history, so it will be
+                recomputed next time.
+                {feedback.persist_error ? ` (${feedback.persist_error})` : ''}
+              </p>
+            )}
           </>
         )}
 
