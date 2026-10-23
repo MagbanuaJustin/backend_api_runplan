@@ -16,9 +16,23 @@ if (PHP_SAPI !== 'cli') {
 
 $repo_root   = dirname(__DIR__);
 $source_root = $repo_root . DIRECTORY_SEPARATOR . 'frontend-sync' . DIRECTORY_SEPARATOR . 'phase0';
+
+$candidates = array(
+    dirname($repo_root) . DIRECTORY_SEPARATOR . 'runplan_frontend',
+    dirname($repo_root) . DIRECTORY_SEPARATOR . 'runplan_frontend_interface',
+    'D:\\ReactProjects\\runplan_frontend_interface',
+);
+$default_target = $candidates[0];
+foreach ($candidates as $candidate) {
+    if (is_dir($candidate . DIRECTORY_SEPARATOR . 'src') && is_file($candidate . DIRECTORY_SEPARATOR . 'package.json')) {
+        $default_target = $candidate;
+        break;
+    }
+}
+
 $target_root = isset($argv[1]) && trim($argv[1]) !== ''
     ? rtrim($argv[1], "/\\")
-    : dirname($repo_root) . DIRECTORY_SEPARATOR . 'runplan_frontend';
+    : $default_target;
 
 if (!is_dir($source_root . DIRECTORY_SEPARATOR . 'src')) {
     fwrite(STDERR, "Frontend Phase 0 bundle not found at: {$source_root}\n");
