@@ -28,7 +28,12 @@ const empty = {
   preferred_time: '',
   baseline_distance_km: '',
   baseline_pace: '',
+  location_label: '',
+  latitude: '',
+  longitude: '',
 }
+
+const numToText = (value) => (value === null || value === undefined ? '' : String(value))
 
 function fromApi(p) {
   return {
@@ -44,6 +49,11 @@ function fromApi(p) {
     preferred_time: p.preferred_time ?? '',
     baseline_distance_km: p.baseline_distance_km === null ? '' : String(p.baseline_distance_km),
     baseline_pace: p.baseline_pace_label ?? '',
+    // Phase 4: optional training location. Older backends do not send this
+    // block at all, so every read is defensive.
+    location_label: p.location?.label ?? '',
+    latitude: numToText(p.location?.latitude),
+    longitude: numToText(p.location?.longitude),
   }
 }
 
@@ -101,6 +111,20 @@ export default function Profile() {
       }
     }
 
+    // A location needs either a name or BOTH coordinates; half a coordinate is
+    // a typo, and the backend says so in the same words.
+    const label = form.location_label.trim()
+    const lat = form.latitude.trim()
+    const lon = form.longitude.trim()
+    const locationErrors = {}
+    if ((lat === '') !== (lon === '')) {
+      locationErrors[lat === '' ? 'latitude' : 'longitude'] = 'Enter both latitude and longitude, or leave both empty.'
+    }
+    if (Object.keys(locationErrors).length) {
+      setErrors(locationErrors)
+      return
+    }
+
     const raceGoal = form.goal !== '' && form.goal !== 'general_fitness'
     const distance = form.baseline_distance_km.trim()
     const desired = form.desired_sessions_per_week === '' ? null : Number(form.desired_sessions_per_week)
@@ -118,6 +142,9 @@ export default function Profile() {
         preferred_time: form.preferred_time || null,
         baseline_distance_km: distance === '' ? null : distance,
         baseline_pace: pace,
+        location_label: label === '' ? null : label,
+        latitude: lat === '' ? null : lat,
+        longitude: lon === '' ? null : lon,
       })
       setForm(fromApi(body.data))
       setSaved(true)
@@ -267,6 +294,58 @@ export default function Profile() {
               />
             </Field>
           </div>
+
+          {/* Phase 4: advisory weather lookup. Optional on purpose - the planner
+              and every other screen work exactly the same without it. */}
+          <fieldset className="fieldset">
+            <legend>Training location (optional, used for weather advisories)</legend>
+            <Field
+              id="pf-location"
+              label="City or area"
+              hint="For example: Mamburao, PH. Leave empty to skip weather."
+              error={errors.location_label}
+            >
+              <input
+                {...attrs('pf-location', 'location_label', true)}
+                autoComplete="off"
+                maxLength={120}
+                placeholder="Mamburao, PH"
+                value={form.location_label}
+                onChange={set('location_label')}
+              />
+            </Field>
+
+            <div className="form-grid-2">
+              <Field id="pf-lat" label="Latitude (optional)" error={errors.latitude}>
+                <input
+                  {...attrs('pf-lat', 'latitude')}
+                  inputMode="decimal"
+                  placeholder="13.2233"
+                  value={form.latitude}
+                  onChange={set('latitude')}
+                />
+              </Field>
+
+              <Field
+                id="pf-lon"
+                label="Longitude (optional)"
+                hint="Leave both coordinates blank and RunPlan will look the city up for you."
+                error={errors.longitude}
+              >
+                <input
+                  {...attrs('pf-lon', 'longitude', true)}
+                  inputMode="decimal"
+                  placeholder="120.5956"
+                  value={form.longitude}
+                  onChange={set('longitude')}
+                />
+              </Field>
+            </div>
+
+            <p className="note" style={{ marginBottom: 0 }}>
+              Weather is advisory only. It never moves, shortens or skips a scheduled workout.
+            </p>
+          </fieldset>
 
           {formError && <p className="error" role="alert">{formError}</p>}
 

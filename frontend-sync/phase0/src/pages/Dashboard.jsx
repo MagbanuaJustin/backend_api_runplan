@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPost } from '../api.js'
 import { TYPE_LABELS, formatDate, formatDuration, formatLongDate, paceLabel } from '../format.js'
+import WeatherPanel from '../components/WeatherPanel.jsx'
 
 const GOAL_LABELS = {
   '5k': '5K Race',
@@ -230,6 +231,9 @@ export default function Dashboard() {
           </span>
         </div>
       </section>
+
+      {/* Phase 4: advisory weather for the next few days (never changes the plan) */}
+      <WeatherPanel />
 
       {/* BioSense-style 4 monospace KPI cards */}
       <p className="section-eyebrow">Last 7 Days Readings</p>

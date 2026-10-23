@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPatch } from '../api.js'
+import { useWeather, WeatherDayNotes } from '../components/WeatherPanel.jsx'
 import {
   STATUS_LABELS, TYPE_LABELS, TYPE_SHORT,
   formatDuration, formatLongDate, monthGrid, paceLabel,
@@ -49,6 +50,7 @@ export default function Calendar() {
   const [skipReason, setSkipReason] = useState('')
 
   const today = new Date().toLocaleDateString('en-CA')
+  const { byDate: weatherByDate } = useWeather()
 
   useEffect(() => {
     Promise.all([apiGet('/plans/current'), apiGet('/activities')])
@@ -271,6 +273,8 @@ export default function Calendar() {
                 </div>
                 <div><dt>Planned Start</dt><dd>{formatStartTime(session.planned_start_time)}</dd></div>
               </dl>
+
+              <WeatherDayNotes day={weatherByDate[selected]} />
 
               {session.notes && <p className="note">{session.notes}</p>}
 

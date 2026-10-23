@@ -283,3 +283,24 @@ small { color: var(--text-muted); font-size: 12px; }
 .dialog-body p { margin: 0 0 20px; color: var(--text-secondary); font-size: 13.5px; }
 .dialog-actions { display: flex; gap: 10px; justify-content: flex-end; }
 .dialog-actions button { height: 38px; padding: 0 16px; border-radius: 8px; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+
+/* ------------------------------------------------------------------
+   Phase 4 - advisory weather (spec 5.2)
+   Advisory only: these styles describe conditions, they never imply that
+   a workout has been changed.
+------------------------------------------------------------------ */
+.weather-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 4px 0 12px; }
+.weather-day { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--bg-input); display: flex; flex-direction: column; gap: 3px; }
+.weather-day.is-caution { border-color: var(--border-accent); background: var(--bg-hover); }
+.weather-day.is-warn { border-color: var(--warning-border); background: var(--warning-bg); }
+.weather-date { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.weather-temp { font-family: var(--font-mono); font-size: 21px; font-weight: 600; line-height: 1.15; color: var(--text); }
+.weather-temp .weather-min { font-size: 12.5px; font-weight: 500; color: var(--text-muted); }
+.weather-meta { font-size: 12px; color: var(--text-secondary); }
+.weather-adv { margin: 8px 0 0; padding-left: 9px; border-left: 2px solid var(--warning); font-size: 12.5px; line-height: 1.45; color: var(--text-secondary); }
+.weather-adv strong { color: var(--warning); }
+.weather-adv.caution { border-left-color: var(--accent-bright); }
+.weather-adv.caution strong { color: var(--accent-bright); }
+.weather-inline { margin: 12px 0; padding: 10px 12px; border-radius: 10px; border: 1px dashed var(--border-strong); background: var(--bg-input); font-size: 13px; color: var(--text-secondary); }
+.weather-inline > strong { color: var(--text); }
+@media (max-width: 640px) { .weather-strip { grid-template-columns: 1fr 1fr; } }
