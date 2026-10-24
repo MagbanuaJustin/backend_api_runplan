@@ -12,6 +12,28 @@ const PROVIDER_LABELS = {
   strava: 'Strava',
 }
 
+function calendarStatus(connection, provider) {
+  if (!connection) return null
+
+  if (connection.status === 'connected') {
+    return connection.sync_enabled
+      ? { className: 'pill-ok', text: 'Connected · sync enabled' }
+      : { className: 'pill-warn', text: 'Connected · paused' }
+  }
+  if (connection.status === 'needs_reconnect') {
+    return { className: 'pill-warn', text: 'Reconnect required' }
+  }
+  if (connection.status === 'disconnected') {
+    return provider?.ready
+      ? { className: 'pill-muted', text: 'Ready · not connected' }
+      : { className: 'pill-muted', text: 'Not configured' }
+  }
+  if (connection.status === 'not_configured') {
+    return { className: 'pill-muted', text: 'Not configured' }
+  }
+  return { className: 'pill-warn', text: 'Temporarily unavailable' }
+}
+
 export default function Status() {
   const { user } = useAuth()
   const [health, setHealth] = useState(null)
@@ -32,6 +54,7 @@ export default function Status() {
   if (state === 'error') return <p role="alert">Could not load system status.</p>
 
   const providers = integrations?.providers ?? {}
+  const calendarConnection = integrations?.google_calendar_connection
   const apiConnected = health?.status === 'ok'
 
   return (
@@ -66,11 +89,11 @@ export default function Status() {
       <section className="plan-card" aria-labelledby="providers-title">
         <div className="panel-head">
           <h2 id="providers-title">External integration modules</h2>
-          <span className="pill pill-muted">Stage B deferred</span>
+          <span className="pill pill-muted">Optional integrations</span>
         </div>
         <p className="note">
-          Core training plans, session rescheduling, manual run logging, and analytics operate independently
-          even when every external provider is disabled.
+          Provider readiness reflects server configuration. Google Calendar also shows this runner's connection state.
+          Core training features remain available when a provider is disabled or unavailable.
         </p>
 
         <div className="table-wrap">
@@ -84,25 +107,33 @@ export default function Status() {
             </thead>
             <tbody>
               {Object.entries(PROVIDER_LABELS).map(([key, label]) => {
-                const p = providers[key]
+                const provider = providers[key]
                 let pillClass = 'pill-muted'
-                let statusText = '\u2014 Deferred (off)'
+                let statusText = '— Not configured'
+                let statusTitle
 
                 if (key === 'strava') {
                   pillClass = 'pill-muted'
-                  statusText = '\u2014 Excluded (policy gate)'
-                } else if (p?.ready) {
+                  statusText = '— Excluded (policy gate)'
+                } else if (key === 'google_calendar' && calendarConnection) {
+                  const calendar = calendarStatus(calendarConnection, provider)
+                  pillClass = calendar.className
+                  statusText = calendar.text
+                  statusTitle = calendarConnection.message
+                } else if (provider?.ready) {
                   pillClass = 'pill-ok'
-                  statusText = '\u2713 Ready'
-                } else if (p?.configured) {
+                  statusText = '✓ Ready'
+                } else if (provider?.configured) {
                   pillClass = 'pill-warn'
-                  statusText = '\u2022 Configured (disabled)'
+                  statusText = '• Configured (disabled)'
                 }
 
                 return (
                   <tr key={key}>
                     <th scope="row" className="wrap-cell">{label}</th>
-                    <td><span className={`pill ${pillClass}`}>{statusText}</span></td>
+                    <td>
+                      <span className={`pill ${pillClass}`} title={statusTitle}>{statusText}</span>
+                    </td>
                   </tr>
                 )
               })}

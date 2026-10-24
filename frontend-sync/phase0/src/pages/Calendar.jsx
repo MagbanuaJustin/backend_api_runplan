@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPatch } from '../api.js'
 import { useWeather, WeatherDayNotes } from '../components/WeatherPanel.jsx'
+import CalendarSyncCard from '../components/CalendarSyncCard.jsx'
 import {
   STATUS_LABELS, TYPE_LABELS, TYPE_SHORT,
   formatDuration, formatLongDate, monthGrid, paceLabel,
@@ -152,6 +153,7 @@ export default function Calendar() {
     return (
       <>
         <h1>Calendar</h1>
+        <CalendarSyncCard />
         <section className="plan-card">
           <h2>No active training plan</h2>
           <p className="note">Generate and approve a plan first to view and reschedule workouts on your calendar.</p>
@@ -182,6 +184,7 @@ export default function Calendar() {
   return (
     <>
       <h1>Calendar</h1>
+      <CalendarSyncCard />
       {notice && <p className="success" role="status">{notice}</p>}
 
       <div className="split-workspace">
