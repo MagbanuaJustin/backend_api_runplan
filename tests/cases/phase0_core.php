@@ -47,6 +47,7 @@ class RpSqliteDb
     {
         $this->pdo = new PDO('sqlite::memory:');
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $this->pdo->exec('PRAGMA foreign_keys = ON');
         $this->bootstrap_schema();
     }
 
@@ -196,10 +197,11 @@ class RpSqliteDb
             CREATE TABLE calendar_event_mappings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
-                session_id INTEGER NOT NULL UNIQUE,
+                session_id INTEGER UNIQUE DEFAULT NULL,
                 provider_event_id TEXT DEFAULT NULL,
                 sync_status TEXT NOT NULL DEFAULT 'pending',
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE SET NULL
             );
             CREATE TABLE password_reset_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1524,4 +1526,82 @@ test('phase5: CalendarSyncModel refreshes tokens and idempotently syncs upcoming
     assert_same(1, $third['deleted']);
     assert_same('DELETE', $third_requests[0]['method']);
     assert_same(0, (int) $db->raw('SELECT COUNT(*) FROM calendar_event_mappings')->fetchColumn());
+});
+
+test('phase5: orphaned Google events stay mapped and are retried after a session is deleted', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+
+    $db = rp_use_sqlite();
+    $db->raw("INSERT INTO users (email) VALUES ('calendar-orphan@example.test')");
+    $user_id = (int) $db->last_id();
+    $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    $vault = new TokenVault(str_repeat('0f', 32));
+    $link_model = new CalendarLinkModel();
+    assert_true($link_model->save_tokens($user_id, array(
+        'access_token' => 'ya29.orphan-cleanup',
+        'refresh_token' => '1//refresh-for-orphan-cleanup',
+        'expires_at' => $now->getTimestamp() + 3600,
+        'token_type' => 'Bearer',
+        'scope' => 'https://www.googleapis.com/auth/calendar.events',
+    ), 'https://www.googleapis.com/auth/calendar.events', $vault));
+
+    $db->raw(
+        "INSERT INTO training_plans (user_id, goal, start_date, end_date, status)
+         VALUES (?, 'half_marathon', '2099-01-01', '2099-04-01', 'active')",
+        array($user_id)
+    );
+    $plan_id = (int) $db->last_id();
+    $db->raw(
+        "INSERT INTO training_sessions
+            (plan_id, user_id, scheduled_date, planned_start_time, type,
+             planned_distance_km, planned_duration_seconds, status)
+         VALUES (?, ?, '2099-01-02', '07:30:00', 'long', 12.5, 5400, 'planned')",
+        array($plan_id, $user_id)
+    );
+    $session_id = (int) $db->last_id();
+
+    $event_id = 'r' . str_repeat('c', 64);
+    $db->raw(
+        "INSERT INTO calendar_event_mappings (user_id, session_id, provider_event_id, sync_status)
+         VALUES (?, ?, ?, 'synced')",
+        array($user_id, $session_id, $event_id)
+    );
+    // The production FK uses ON DELETE SET NULL, preserving the event mapping.
+    $db->raw('DELETE FROM training_sessions WHERE id = ?', array($session_id));
+    assert_same(null, $db->raw('SELECT session_id FROM calendar_event_mappings WHERE user_id = ?', array($user_id))->fetchColumn());
+
+    $config = rp_gcal_config();
+    $oauth = new GoogleCalendarService($config);
+    $events = new GoogleCalendarEventService($config);
+    $model = new CalendarSyncModel();
+
+    // A provider outage must keep the tombstone so the next manual sync can retry.
+    HttpClient::fake(array(
+        array('ok' => false, 'status' => 429, 'body' => json_encode(array('error' => array('message' => 'private provider detail')))),
+    ));
+    $first = $model->sync_for_user($user_id, $oauth, $events, $vault, $now);
+    $first_requests = HttpClient::recorded();
+    HttpClient::stop_faking();
+
+    assert_false($first['ok']);
+    assert_same('partial', $first['status']);
+    assert_same(1, $first['total']);
+    assert_same('DELETE', $first_requests[0]['method']);
+    assert_contains('/events/' . $event_id, $first_requests[0]['url']);
+    assert_same(1, (int) $db->raw('SELECT COUNT(*) FROM calendar_event_mappings WHERE session_id IS NULL')->fetchColumn());
+    assert_same('failed', (string) $db->raw('SELECT sync_status FROM calendar_event_mappings WHERE user_id = ?', array($user_id))->fetchColumn());
+
+    HttpClient::fake(array(
+        array('ok' => true, 'status' => 204, 'body' => ''),
+    ));
+    $second = $model->sync_for_user($user_id, $oauth, $events, $vault, $now);
+    $second_requests = HttpClient::recorded();
+    HttpClient::stop_faking();
+
+    assert_true($second['ok']);
+    assert_same(1, $second['deleted']);
+    assert_same('DELETE', $second_requests[0]['method']);
+    assert_same(0, (int) $db->raw('SELECT COUNT(*) FROM calendar_event_mappings WHERE session_id IS NULL')->fetchColumn());
 });

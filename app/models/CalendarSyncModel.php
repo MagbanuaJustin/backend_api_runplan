@@ -99,16 +99,19 @@ class CalendarSyncModel extends Model {
                   ORDER BY s.scheduled_date ASC, s.planned_start_time ASC, s.id ASC",
                 array($uid, $today)
             )->fetchAll(PDO::FETCH_ASSOC);
+            // Migration 016 preserves mappings as tombstones when sessions are
+            // deleted. Clean those Google events before syncing current sessions.
+            $orphan_mappings = $this->orphan_mappings_for_user($uid);
         } catch (Throwable $e) {
             return $this->outcome(false, 'unavailable', 0, 0, 0, 0,
                 'Calendar sync is temporarily unavailable. Your training plan is unaffected.');
         }
 
-        $total = count($sessions);
+        $total = count($sessions) + count($orphan_mappings);
         if ($total === 0) {
             $links->mark_synced($uid, $calendar_id);
             return $this->outcome(true, 'synced', 0, 0, 0, 0,
-                'There are no upcoming planned sessions to add.');
+                'There are no upcoming planned sessions or obsolete calendar events to sync.');
         }
 
         $now_unix = $now->getTimestamp();
@@ -132,7 +135,81 @@ class CalendarSyncModel extends Model {
         $duration_default = (int) integration_value('google_calendar', 'event_length_minutes', 60);
 
         $deleted = 0;
-        foreach ($sessions as $session) {
+
+        // Session rows are deleted during plan revisions. Their mappings are
+        // retained with session_id = NULL, so remove the old Google events first.
+        foreach ($orphan_mappings as $orphan) {
+            $mapping_id = (int) ($orphan['id'] ?? 0);
+            $event_id = trim((string) ($orphan['provider_event_id'] ?? ''));
+
+            if ($event_id === '') {
+                if ($this->delete_orphan_mapping($uid, $mapping_id)) {
+                    $done++;
+                    continue;
+                }
+                $failed++;
+                $done++;
+                $last_error = 'RunPlan could not remove an obsolete calendar mapping.';
+                break;
+            }
+
+            try {
+                $result = $events->delete_event(
+                    (string) ($tokens['access_token'] ?? ''),
+                    $calendar_id,
+                    $event_id
+                );
+
+                if (!$result['ok'] && ($result['error_code'] ?? '') === 'unauthorized' && !$refreshed_after_401) {
+                    $refreshed_after_401 = true;
+                    $refresh = $this->refresh_and_store($uid, $tokens, $oauth, $vault, $links);
+                    if ($refresh['ok']) {
+                        $tokens = $refresh['tokens'];
+                        $result = $events->delete_event(
+                            (string) ($tokens['access_token'] ?? ''),
+                            $calendar_id,
+                            $event_id
+                        );
+                    } else {
+                        $fatal_status = (string) $refresh['status'];
+                        $result = array(
+                            'ok' => false,
+                            'error_code' => $fatal_status,
+                            'message' => (string) $refresh['message'],
+                        );
+                    }
+                }
+
+                if (!$result['ok']) {
+                    $failed++;
+                    $done++;
+                    $last_error = (string) ($result['message'] ?? 'Google Calendar could not remove an obsolete event.');
+                    $this->mark_orphan_mapping_failed($uid, $mapping_id);
+                    if (($result['error_code'] ?? '') === 'rate_limited') {
+                        $rate_limited = true;
+                    }
+                    break;
+                }
+
+                if (!$this->delete_orphan_mapping($uid, $mapping_id)) {
+                    $failed++;
+                    $done++;
+                    $last_error = 'Google removed an obsolete event, but RunPlan could not remove its local mapping.';
+                    break;
+                }
+
+                $deleted++;
+                $done++;
+            } catch (Throwable $e) {
+                $failed++;
+                $done++;
+                $last_error = 'RunPlan could not process an obsolete calendar mapping.';
+                $this->mark_orphan_mapping_failed($uid, $mapping_id);
+                break;
+            }
+        }
+
+        foreach (($failed === 0) ? $sessions : array() as $session) {
             $session_id = (int) ($session['id'] ?? 0);
             $stable_id  = $this->stable_event_id($uid, $session_id);
 
@@ -311,7 +388,7 @@ class CalendarSyncModel extends Model {
                 $changes[] = 'updated ' . $updated . ' session' . ($updated === 1 ? '' : 's');
             }
             if ($deleted > 0) {
-                $changes[] = 'removed ' . $deleted . ' skipped session' . ($deleted === 1 ? '' : 's');
+                $changes[] = 'removed ' . $deleted . ' obsolete calendar event' . ($deleted === 1 ? '' : 's');
             }
             $message = $changes
                 ? 'Google Calendar sync complete: ' . implode(', ', $changes) . '.'
@@ -507,6 +584,43 @@ class CalendarSyncModel extends Model {
             return true;
         } catch (Throwable $e) {
             return false;
+        }
+    }
+
+    private function orphan_mappings_for_user($user_id)
+    {
+        return $this->db->raw(
+            'SELECT id, provider_event_id, sync_status FROM calendar_event_mappings
+              WHERE user_id = ? AND session_id IS NULL ORDER BY id ASC',
+            array((int) $user_id)
+        )->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function delete_orphan_mapping($user_id, $mapping_id)
+    {
+        try {
+            $this->db->raw(
+                'DELETE FROM calendar_event_mappings
+                  WHERE id = ? AND user_id = ? AND session_id IS NULL',
+                array((int) $mapping_id, (int) $user_id)
+            );
+            return true;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
+    private function mark_orphan_mapping_failed($user_id, $mapping_id)
+    {
+        try {
+            $this->db->raw(
+                "UPDATE calendar_event_mappings SET sync_status = 'failed', updated_at = ?
+                  WHERE id = ? AND user_id = ? AND session_id IS NULL",
+                array(gmdate('Y-m-d H:i:s'), (int) $mapping_id, (int) $user_id)
+            );
+        } catch (Throwable $e) {
+            // The tombstone remains for the next sync attempt even if this
+            // diagnostic update cannot be written.
         }
     }
 
