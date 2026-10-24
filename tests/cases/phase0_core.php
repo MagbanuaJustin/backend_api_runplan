@@ -22,6 +22,7 @@ require_once RP_ROOT . 'app/libraries/HttpClient.php';
 require_once RP_ROOT . 'app/libraries/AnthropicService.php';
 require_once RP_ROOT . 'app/libraries/OpenWeatherService.php';
 require_once RP_ROOT . 'app/models/WeatherModel.php';
+require_once RP_ROOT . 'app/helpers/integration_helper.php';
 require_once RP_ROOT . 'app/libraries/TokenVault.php';
 require_once RP_ROOT . 'app/libraries/OAuthState.php';
 require_once RP_ROOT . 'app/models/CalendarLinkModel.php';
@@ -466,6 +467,9 @@ test('phase0: protected API routes attach auth middleware and OPTIONS preflight 
         '/api/auth/logout',
         '/api/auth/forgot-password',
         '/api/auth/reset-password',
+        // Google's OAuth redirect: a browser navigation with no bearer token.
+        // Identity comes from the signed `state`, verified before any exchange.
+        '/calendar/callback',
     );
 
     preg_match_all('/^\$router->(get|post|put|patch|delete)\(\'([^\']+)\',[^\n]+$/m', $routes, $lines, PREG_SET_ORDER);
@@ -1206,4 +1210,152 @@ test('phase5: CalendarLinkModel degrades instead of throwing when its table is g
     assert_same(null, $model->tokens_for_user(9, $vault));
     assert_false($model->save_tokens(9, array('refresh_token' => 'x'), null, $vault));
     assert_false($model->forget_user(9));
+});
+
+/**
+ * Google Calendar config for tests: ready, with obvious fake credentials.
+ */
+function rp_gcal_config(array $overrides = array())
+{
+    return array_merge(array(
+        'enabled'              => true,
+        'client_id'            => 'client-123.apps.googleusercontent.com',
+        'client_secret'        => 'super-secret-value',
+        'redirect_uri'         => 'http://localhost/runplan_lavalust_api/public/calendar/callback',
+        'scopes'               => array('https://www.googleapis.com/auth/calendar.events'),
+        'token_aad'            => str_repeat('0f', 32),
+        'timeout'              => 5,
+        'event_length_minutes' => 45,
+        'return_url'           => 'http://localhost:5173/account',
+    ), $overrides);
+}
+
+test('phase5: GoogleCalendarService builds the consent URL and exchanges a code', function () {
+    $service = new GoogleCalendarService(rp_gcal_config());
+    assert_true($service->is_ready());
+    assert_same(45, $service->event_minutes());
+
+    $url = $service->authorize_url('v1.42.123.abc.def');
+    assert_contains('accounts.google.com/o/oauth2/v2/auth', $url);
+    assert_contains('client_id=client-123.apps.googleusercontent.com', $url);
+    assert_contains('access_type=offline', $url, 'offline access is what yields a refresh token');
+    assert_contains('prompt=consent', $url, 'a reconnect must not silently lose the refresh token');
+    assert_contains(rawurlencode('https://www.googleapis.com/auth/calendar.events'), $url);
+    assert_contains('state=v1.42.123.abc.def', $url);
+
+    HttpClient::fake(array(array('ok' => true, 'status' => 200, 'body' => json_encode(array(
+        'access_token'  => 'ya29.token',
+        'refresh_token' => '1//refresh',
+        'expires_in'    => 3599,
+        'token_type'    => 'Bearer',
+        'scope'         => 'https://www.googleapis.com/auth/calendar.events',
+    )))));
+
+    $res = $service->exchange_code('auth-code-1');
+    assert_true($res['ok']);
+    assert_same('ya29.token', $res['tokens']['access_token']);
+    assert_same('1//refresh', $res['tokens']['refresh_token']);
+    assert_same('Bearer', $res['tokens']['token_type']);
+    assert_true($res['tokens']['expires_at'] > time() + 3000, 'expires_in becomes an absolute time');
+    assert_false(strpos(json_encode($res), 'super-secret-value') !== false, 'the client secret never leaves the request');
+
+    $sent = HttpClient::recorded()[0];
+    assert_same('POST', $sent['method']);
+    assert_contains('grant_type=authorization_code', (string) $sent['body']);
+    assert_contains('code=auth-code-1', (string) $sent['body']);
+
+    HttpClient::stop_faking();
+});
+
+test('phase5: GoogleCalendarService refreshes, revokes, and maps provider errors', function () {
+    $service = new GoogleCalendarService(rp_gcal_config());
+
+    // A refresh reply usually omits refresh_token: keep the stored one.
+    HttpClient::fake(array(array('ok' => true, 'status' => 200, 'body' => json_encode(array(
+        'access_token' => 'ya29.new', 'expires_in' => 3600, 'token_type' => 'Bearer',
+    )))));
+    $res = $service->refresh('1//refresh', array('refresh_token' => '1//refresh'));
+    assert_true($res['ok']);
+    assert_same('ya29.new', $res['tokens']['access_token']);
+    assert_same('1//refresh', $res['tokens']['refresh_token'], 'the stored refresh token survives a refresh');
+    HttpClient::stop_faking();
+
+    // A revoked grant is named by us, not echoed from Google.
+    HttpClient::fake(array(array('ok' => false, 'status' => 400, 'body' => json_encode(array('error' => 'invalid_grant')))));
+    $res = $service->refresh('1//dead');
+    assert_false($res['ok']);
+    assert_same('revoked', $res['error_code']);
+    assert_false(strpos($res['error'], 'invalid_grant') !== false, 'provider text is never echoed to a client');
+    HttpClient::stop_faking();
+
+    // Provider down, and a missing code.
+    HttpClient::fake(array(array('ok' => false, 'status' => 503, 'body' => '{}')));
+    assert_same('unavailable', $service->exchange_code('abc')['error_code']);
+    HttpClient::stop_faking();
+    assert_same('denied', $service->exchange_code('')['error_code']);
+
+    // Revoke is a best-effort POST to Google's revoke endpoint.
+    HttpClient::fake(array(array('ok' => true, 'status' => 200, 'body' => '')));
+    assert_true($service->revoke('1//refresh'));
+    assert_contains('oauth2.googleapis.com/revoke', HttpClient::recorded()[0]['url']);
+    HttpClient::stop_faking();
+
+    // Off, or missing a key, means "not ready" rather than a broken app.
+    assert_false((new GoogleCalendarService(rp_gcal_config(array('enabled' => false))))->is_ready());
+    assert_false((new GoogleCalendarService(rp_gcal_config(array('client_secret' => ''))))->is_ready());
+    assert_false((new GoogleCalendarService(rp_gcal_config(array('redirect_uri' => ''))))->is_ready());
+});
+
+test('phase5: a signed state connects a calendar, a forged one is refused', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    $db = rp_use_sqlite();
+    $db->raw("INSERT INTO users (email) VALUES ('gcal@example.test')");
+
+    $vault   = new TokenVault(str_repeat('0f', 32));
+    $guard   = new OAuthState(str_repeat('ab', 32));
+    $service = new GoogleCalendarService(rp_gcal_config());
+    $model   = new CalendarLinkModel();
+
+    // 1. The consent URL carries a state only this server could have signed.
+    $flow = $model->connect_url(11, $service, $guard, $vault);
+    assert_true($flow['ready']);
+    assert_contains('accounts.google.com', (string) $flow['auth_url']);
+    assert_same(OAuthState::TTL, $flow['expires_in']);
+
+    parse_str((string) parse_url((string) $flow['auth_url'], PHP_URL_QUERY), $query);
+    assert_same(11, $guard->verify($query['state'] ?? ''), 'the state resolves to the runner who asked');
+
+    // 2. A forged state is refused before any token exchange happens.
+    HttpClient::fake(array());
+    $bad = $model->finish_connection('v1.11.9999999999.deadbeef.0000', 'code', $service, $guard, $vault);
+    assert_false($bad['ok']);
+    assert_same('invalid_state', $bad['reason']);
+    assert_same(0, count(HttpClient::recorded()), 'no exchange without a valid state');
+
+    // 3. The real callback exchanges the code and stores sealed tokens.
+    HttpClient::fake(array(array('ok' => true, 'status' => 200, 'body' => json_encode(array(
+        'access_token'  => 'ya29.a',
+        'refresh_token' => '1//r',
+        'expires_in'    => 3600,
+        'token_type'    => 'Bearer',
+        'scope'         => 'https://www.googleapis.com/auth/calendar.events',
+    )))));
+    $good = $model->finish_connection($query['state'], 'code-1', $service, $guard, $vault);
+    HttpClient::stop_faking();
+
+    assert_true($good['ok']);
+    assert_same(11, $good['user_id']);
+    assert_same('connected', $model->status_for_user(11, true, $vault)['status']);
+    assert_same('1//r', $model->tokens_for_user(11, $vault)['refresh_token']);
+
+    // 4. Disconnect revokes at Google and forgets locally.
+    HttpClient::fake(array(array('ok' => true, 'status' => 200, 'body' => '')));
+    $out = $model->disconnect(11, $service, $vault);
+    HttpClient::stop_faking();
+    assert_true($out['ok']);
+    assert_true($out['revoked']);
+    assert_same('disconnected', $model->status_for_user(11, true, $vault)['status']);
+    assert_same(0, (int) $db->raw('SELECT COUNT(*) FROM integration_accounts')->fetchColumn());
 });

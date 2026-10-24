@@ -2,6 +2,8 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 require_once dirname(__DIR__) . '/libraries/TokenVault.php';
+require_once dirname(__DIR__) . '/libraries/OAuthState.php';
+require_once dirname(__DIR__) . '/libraries/GoogleCalendarService.php';
 
 /**
  * Model: CalendarLinkModel
@@ -350,8 +352,155 @@ class CalendarLinkModel extends Model {
     }
 
     // ------------------------------------------------------------------
+    // OAuth flow (spec 5.3)
+    // ------------------------------------------------------------------
+
+    /**
+     * The consent URL for one runner.
+     *
+     * Returned rather than redirected so the browser can open it as a normal
+     * navigation while the SPA keeps its JWT in memory. When the provider is
+     * not configured `auth_url` is null and the UI shows `message` - a missing
+     * key is never an error page (NFR-04).
+     *
+     * @param int                       $user_id
+     * @param GoogleCalendarService|null $service
+     * @param OAuthState|null           $state_guard
+     * @param TokenVault|null           $vault
+     * @return array {ready, status, auth_url, expires_in, message}
+     */
+    public function connect_url($user_id, ?GoogleCalendarService $service = null, ?OAuthState $state_guard = null, ?TokenVault $vault = null)
+    {
+        $uid     = (int) $user_id;
+        $service = $service ?: new GoogleCalendarService();
+        $guard   = $state_guard ?: new OAuthState();
+
+        $status = $this->status_for_user($uid, $service->is_ready(), $vault);
+
+        if ($uid <= 0) {
+            return array('ready' => false, 'status' => self::STATE_UNAVAILABLE, 'auth_url' => null,
+                         'expires_in' => 0, 'message' => 'Sign in again to connect a calendar.');
+        }
+
+        if (!$service->is_ready() || !$guard->is_ready()) {
+            return array('ready' => false, 'status' => self::STATE_NOT_CONFIGURED, 'auth_url' => null,
+                         'expires_in' => 0, 'message' => $status['message']);
+        }
+
+        $state = $guard->issue($uid);
+        if ($state === null) {
+            return array('ready' => false, 'status' => self::STATE_NOT_CONFIGURED, 'auth_url' => null,
+                         'expires_in' => 0, 'message' => 'Google Calendar sync is not configured on this server.');
+        }
+
+        return array(
+            'ready'      => true,
+            'status'     => $status['status'],
+            'auth_url'   => $service->authorize_url($state),
+            'expires_in' => OAuthState::TTL,
+            'message'    => 'Open the Google consent screen to finish connecting.',
+        );
+    }
+
+    /**
+     * Finish the flow from the callback query string.
+     *
+     * The `state` value is the only identity this request has: the callback is a
+     * browser navigation from Google and carries no bearer token.
+     *
+     * @param mixed                     $state_value
+     * @param mixed                     $code
+     * @param GoogleCalendarService|null $service
+     * @param OAuthState|null           $state_guard
+     * @param TokenVault|null           $vault
+     * @return array {ok, user_id, reason, message}
+     */
+    public function finish_connection($state_value, $code, ?GoogleCalendarService $service = null, ?OAuthState $state_guard = null, ?TokenVault $vault = null)
+    {
+        $service = $service ?: new GoogleCalendarService();
+        $guard   = $state_guard ?: new OAuthState();
+
+        if (!$service->is_ready()) {
+            return $this->outcome(false, null, 'not_configured',
+                'Google Calendar sync is turned off on this server.');
+        }
+
+        $uid = $guard->verify($state_value);
+        if ($uid === null) {
+            return $this->outcome(false, null, 'invalid_state',
+                'That connect link has expired or was altered. Start again from RunPlan.');
+        }
+
+        $res = $service->exchange_code($code);
+        if (!$res['ok']) {
+            return $this->outcome(false, $uid, (string) $res['error_code'], (string) $res['error']);
+        }
+
+        $saved = $this->save_tokens($uid, $res['tokens'], $res['tokens']['scope'] ?? null, $vault);
+        if (!$saved) {
+            return $this->outcome(false, $uid, 'storage_failed',
+                'Google approved the connection, but RunPlan could not save it. Check the server logs.');
+        }
+
+        return $this->outcome(true, $uid, 'ok', 'Google Calendar is connected.');
+    }
+
+    /**
+     * Revoke at Google, then forget the grant locally.
+     *
+     * Local removal happens even when Google cannot be reached: a runner who
+     * pressed Disconnect must not stay connected because a provider was down.
+     *
+     * @param int                       $user_id
+     * @param GoogleCalendarService|null $service
+     * @param TokenVault|null           $vault
+     * @return array {ok, revoked, message}
+     */
+    public function disconnect($user_id, ?GoogleCalendarService $service = null, ?TokenVault $vault = null)
+    {
+        $uid      = (int) $user_id;
+        $service  = $service ?: new GoogleCalendarService();
+        $tokens   = $this->tokens_for_user($uid, $vault);
+        $revoked  = true;
+
+        if ($service->is_ready() && is_array($tokens)) {
+            $token = (string) ($tokens['refresh_token'] ?? $tokens['access_token'] ?? '');
+            $revoked = $token === '' ? true : $service->revoke($token);
+        }
+
+        $forgotten = $this->forget_user($uid);
+
+        return array(
+            'ok'      => $forgotten,
+            'revoked' => $revoked,
+            'message' => $forgotten
+                ? ($revoked
+                    ? 'Google Calendar is disconnected.'
+                    : 'Disconnected here. Google could not be reached to revoke the grant; remove RunPlan at myaccount.google.com if you want it gone there too.')
+                : 'Could not disconnect. Try again.',
+        );
+    }
+
+    // ------------------------------------------------------------------
     // Internals
     // ------------------------------------------------------------------
+
+    /**
+     * @param bool        $ok
+     * @param int|null    $user_id
+     * @param string      $reason
+     * @param string      $message
+     * @return array
+     */
+    private function outcome($ok, $user_id, $reason, $message)
+    {
+        return array(
+            'ok'      => (bool) $ok,
+            'user_id' => $user_id === null ? null : (int) $user_id,
+            'reason'  => (string) $reason,
+            'message' => (string) $message,
+        );
+    }
 
     /**
      * @param int $user_id

@@ -81,6 +81,10 @@ $config['integrations'] = array(
         'token_aad'     => env('GCAL_TOKEN_AAD'),   // 32-byte hex key used to encrypt refresh tokens at rest
         'timeout'       => (int) env('GCAL_TIMEOUT', 15),
         'event_length_minutes' => (int) env('GCAL_EVENT_MINUTES', 60),
+        // Where the browser lands after Google's consent screen. The SPA origin,
+        // not the API: the callback stores the tokens, then redirects here with
+        // ?calendar=connected|denied|...
+        'return_url'    => env('GCAL_RETURN_URL', 'http://localhost:5173/account'),
     ),
 
     /*

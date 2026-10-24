@@ -64,5 +64,14 @@ $router->get('/api/ai/feedback', 'AiCoaching::show')->middleware('auth');
 $router->post('/api/ai/feedback', 'AiCoaching::generate')->middleware('auth');
 
 $router->get('/api/weather/forecast', 'Weather::forecast')->middleware('auth');
+
+$router->get('/api/calendar/status', 'CalendarSync::status')->middleware('auth');
+$router->get('/api/calendar/connect', 'CalendarSync::connect')->middleware('auth');
+$router->post('/api/calendar/disconnect', 'CalendarSync::disconnect')->middleware('auth');
+$router->post('/api/calendar/sync-enabled', 'CalendarSync::toggle')->middleware('auth');
+
+// Public: Google's OAuth redirect lands here. Trust comes from the signed state
+// value, not from a bearer token, so this is the one calendar route without auth.
+$router->get('/calendar/callback', 'CalendarSync::callback');
 $router->get('/api/integrations', 'Integrations::status')->middleware('auth');
 $router->get('/api/integrations/status', 'Integrations::status')->middleware('auth');
