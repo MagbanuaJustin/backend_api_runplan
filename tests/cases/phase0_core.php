@@ -22,6 +22,9 @@ require_once RP_ROOT . 'app/libraries/HttpClient.php';
 require_once RP_ROOT . 'app/libraries/AnthropicService.php';
 require_once RP_ROOT . 'app/libraries/OpenWeatherService.php';
 require_once RP_ROOT . 'app/models/WeatherModel.php';
+require_once RP_ROOT . 'app/libraries/TokenVault.php';
+require_once RP_ROOT . 'app/libraries/OAuthState.php';
+require_once RP_ROOT . 'app/models/CalendarLinkModel.php';
 
 /**
  * Tiny in-memory SQLite adapter matching the subset of LavaLust's Database API
@@ -173,6 +176,20 @@ class RpSqliteDb
                 scheduled_at TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending'
             );
+            CREATE TABLE integration_accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                encrypted_tokens TEXT NOT NULL,
+                scopes TEXT DEFAULT NULL,
+                connected_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                calendar_id TEXT DEFAULT NULL,
+                sync_enabled INTEGER NOT NULL DEFAULT 1,
+                last_synced_at TEXT DEFAULT NULL,
+                last_error TEXT DEFAULT NULL,
+                updated_at TEXT DEFAULT NULL,
+                UNIQUE (user_id, provider)
+            );
             CREATE TABLE password_reset_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -280,6 +297,13 @@ class RpSqliteDb
         list($where_sql, $w_args) = $this->where_clause();
         $sql = "UPDATE {$this->table_name} SET " . implode(', ', $sets) . $where_sql;
         return $this->raw($sql, array_merge($args, $w_args));
+    }
+
+    public function delete()
+    {
+        list($where_sql, $w_args) = $this->where_clause();
+        $sql = "DELETE FROM {$this->table_name}{$where_sql}";
+        return $this->raw($sql, $w_args);
     }
 
     private function select_sql($suffix)
@@ -1039,4 +1063,147 @@ test('phase4: WeatherModel caches the forecast, remembers coordinates, and never
     assert_same(0, count(HttpClient::recorded()));
 
     HttpClient::stop_faking();
+});
+
+// ---------------------------------------------------------------------
+// 8. Phase 4 step 3 - Google Calendar connection (spec 5.3)
+// ---------------------------------------------------------------------
+
+test('phase5: TokenVault seals tokens with AEAD and refuses tampering or a foreign key', function () {
+    $key   = str_repeat('0f', 32);
+    $vault = new TokenVault($key);
+    assert_true($vault->is_ready(), 'a 32-byte hex key must be usable');
+
+    $tokens = array(
+        'refresh_token' => '1//refresh-abc',
+        'access_token'  => 'ya29.xyz',
+        'expires_at'    => 1767225600,
+    );
+
+    $blob = $vault->seal($tokens);
+    assert_true(is_string($blob) && $blob !== '', 'sealing must produce an envelope');
+    assert_false(strpos($blob, 'refresh-abc') !== false, 'the plaintext must not survive in the envelope');
+    assert_same($tokens, $vault->open($blob), 'round trip');
+
+    // A fresh IV every time: two seals of the same payload differ.
+    assert_true($vault->seal($tokens) !== $blob, 'IV must not be reused');
+
+    // Wrong key, one flipped ciphertext bit, and junk all fail closed.
+    assert_same(null, (new TokenVault(str_repeat('1e', 32)))->open($blob), 'a foreign key cannot open it');
+
+    $envelope = json_decode(base64_decode($blob), true);
+    $ct       = base64_decode($envelope['ct']);
+    $ct[0]    = chr(ord($ct[0]) ^ 0x01);
+    $envelope['ct'] = base64_encode($ct);
+    assert_same(null, $vault->open(base64_encode(json_encode($envelope))), 'GCM must reject a modified ciphertext');
+
+    assert_same(null, $vault->open('not-base64-at-all!!'));
+    assert_same(null, $vault->open(null));
+
+    // No key configured: sealing is refused rather than falling back to plaintext.
+    $off = new TokenVault('');
+    assert_false($off->is_ready());
+    assert_same(null, $off->seal($tokens));
+    assert_same(null, $off->open($blob));
+});
+
+test('phase5: OAuthState is signed, bound to one user, and expires', function () {
+    $now   = 1767225600;
+    $state = new OAuthState(str_repeat('ab', 32));
+
+    $value = $state->issue(42, 600, $now);
+    assert_true(is_string($value) && $value !== '');
+    assert_same(42, $state->verify($value, $now + 60), 'a fresh state resolves to its user');
+
+    assert_same(null, $state->verify(str_replace('.42.', '.43.', $value), $now + 60), 'the user id is signed');
+    assert_same(null, $state->verify($value, $now + 601), 'expired state');
+    assert_same(null, (new OAuthState(str_repeat('cd', 32)))->verify($value, $now + 60), 'a different secret is refused');
+    assert_same(null, $state->verify('', $now));
+    assert_same(null, $state->verify('v1.42.1767226200.deadbeef', $now), 'a truncated state is refused');
+
+    $off = new OAuthState('');
+    assert_false($off->is_ready());
+    assert_same(null, $off->issue(42, 600, $now), 'no secret means no flow');
+    assert_same(null, $off->verify($value, $now));
+});
+
+test('phase5: CalendarLinkModel connects, pauses, needs reconnect, and disconnects', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    $db = rp_use_sqlite();
+    $db->raw("INSERT INTO users (email) VALUES ('cal@example.test')");
+
+    $vault = new TokenVault(str_repeat('0f', 32));
+    $model = new CalendarLinkModel();
+
+    // 1. Feature off -> a normal state, and nothing is written.
+    $s = $model->status_for_user(7, false, $vault);
+    assert_same('not_configured', $s['status']);
+    assert_false($s['connected']);
+    assert_false($model->save_tokens(7, array('refresh_token' => 'x'), null, new TokenVault('')));
+
+    // 2. Configured but never connected.
+    $s = $model->status_for_user(7, true, $vault);
+    assert_same('disconnected', $s['status']);
+    assert_true($s['ok']);
+
+    // 3. Connect.
+    $tokens = array(
+        'refresh_token' => '1//r',
+        'access_token'  => 'ya29.a',
+        'expires_at'    => 1767225600,
+        'token_type'    => 'Bearer',
+    );
+    assert_true($model->save_tokens(7, $tokens, 'https://www.googleapis.com/auth/calendar.events', $vault));
+
+    $s = $model->status_for_user(7, true, $vault);
+    assert_same('connected', $s['status']);
+    assert_true($s['can_sync']);
+    assert_same('primary', $s['calendar_id']);
+    assert_same(array('https://www.googleapis.com/auth/calendar.events'), $s['scopes']);
+    assert_same($tokens, $model->tokens_for_user(7, $vault));
+
+    // The column holds an envelope, never the refresh token itself.
+    $stored = $db->raw('SELECT encrypted_tokens FROM integration_accounts WHERE user_id = 7')->fetch(PDO::FETCH_ASSOC);
+    assert_false(strpos($stored['encrypted_tokens'], '1//r') !== false, 'tokens must not be stored in the clear');
+
+    // 4. Sync bookkeeping.
+    assert_true($model->mark_synced(7, 'primary'));
+    assert_true($model->mark_error(7, 'quota exceeded'));
+    $s = $model->status_for_user(7, true, $vault);
+    assert_contains('quota', (string) $s['last_error']);
+    assert_true($s['last_synced_at'] !== null, 'a successful sync is remembered');
+
+    // 5. Pausing keeps the grant.
+    assert_true($model->set_sync_enabled(7, false));
+    $s = $model->status_for_user(7, true, $vault);
+    assert_same('connected', $s['status']);
+    assert_false($s['can_sync']);
+
+    // 6. A rotated key is "reconnect", not a crash.
+    $s = $model->status_for_user(7, true, new TokenVault(str_repeat('9a', 32)));
+    assert_same('needs_reconnect', $s['status']);
+    assert_false($s['can_sync']);
+
+    // 7. Disconnect forgets everything.
+    assert_true($model->forget_user(7));
+    assert_same('disconnected', $model->status_for_user(7, true, $vault)['status']);
+    assert_same(null, $model->tokens_for_user(7, $vault));
+});
+
+test('phase5: CalendarLinkModel degrades instead of throwing when its table is gone', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+    $db = rp_use_sqlite();
+    $db->raw('DROP TABLE integration_accounts');
+
+    $vault = new TokenVault(str_repeat('0f', 32));
+    $model = new CalendarLinkModel();
+
+    assert_same('unavailable', $model->status_for_user(9, true, $vault)['status']);
+    assert_same(null, $model->tokens_for_user(9, $vault));
+    assert_false($model->save_tokens(9, array('refresh_token' => 'x'), null, $vault));
+    assert_false($model->forget_user(9));
 });
