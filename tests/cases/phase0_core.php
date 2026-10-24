@@ -25,7 +25,9 @@ require_once RP_ROOT . 'app/models/WeatherModel.php';
 require_once RP_ROOT . 'app/helpers/integration_helper.php';
 require_once RP_ROOT . 'app/libraries/TokenVault.php';
 require_once RP_ROOT . 'app/libraries/OAuthState.php';
+require_once RP_ROOT . 'app/libraries/GoogleCalendarEventService.php';
 require_once RP_ROOT . 'app/models/CalendarLinkModel.php';
+require_once RP_ROOT . 'app/models/CalendarSyncModel.php';
 
 /**
  * Tiny in-memory SQLite adapter matching the subset of LavaLust's Database API
@@ -190,6 +192,14 @@ class RpSqliteDb
                 last_error TEXT DEFAULT NULL,
                 updated_at TEXT DEFAULT NULL,
                 UNIQUE (user_id, provider)
+            );
+            CREATE TABLE calendar_event_mappings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                session_id INTEGER NOT NULL UNIQUE,
+                provider_event_id TEXT DEFAULT NULL,
+                sync_status TEXT NOT NULL DEFAULT 'pending',
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE password_reset_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1226,6 +1236,7 @@ function rp_gcal_config(array $overrides = array())
         'token_aad'            => str_repeat('0f', 32),
         'timeout'              => 5,
         'event_length_minutes' => 45,
+        'timezone'             => 'Asia/Manila',
         'return_url'           => 'http://localhost:5173/account',
     ), $overrides);
 }
@@ -1358,4 +1369,159 @@ test('phase5: a signed state connects a calendar, a forged one is refused', func
     assert_true($out['revoked']);
     assert_same('disconnected', $model->status_for_user(11, true, $vault)['status']);
     assert_same(0, (int) $db->raw('SELECT COUNT(*) FROM integration_accounts')->fetchColumn());
+});
+
+test('phase5: GoogleCalendarEventService creates, patches, recovers missing events, and maps errors safely', function () {
+    $config = rp_gcal_config();
+    $service = new GoogleCalendarEventService($config);
+    $stable = 'r' . str_repeat('a', 64);
+    $older  = 'r' . str_repeat('b', 64);
+    $event = array(
+        'id' => $stable,
+        'summary' => 'RunPlan: Easy run (5.0 km)',
+        'start' => array('dateTime' => '2099-01-02T07:00:00+08:00', 'timeZone' => 'Asia/Manila'),
+        'end' => array('dateTime' => '2099-01-02T08:00:00+08:00', 'timeZone' => 'Asia/Manila'),
+    );
+
+    HttpClient::fake(array(
+        array('ok' => true, 'status' => 201, 'body' => json_encode(array('id' => $stable))),
+        array('ok' => true, 'status' => 200, 'body' => json_encode(array('id' => $stable))),
+        array('ok' => false, 'status' => 404, 'body' => json_encode(array('error' => array('message' => 'not found')))),
+        array('ok' => true, 'status' => 201, 'body' => json_encode(array('id' => $older))),
+        array('ok' => false, 'status' => 429, 'body' => json_encode(array('error' => array('message' => 'private provider detail')))),
+    ));
+
+    $created = $service->upsert('ya29.fake', 'primary', null, $event, $stable);
+    $updated = $service->upsert('ya29.fake', 'primary', $stable, $event, $stable);
+    $recreated = $service->upsert('ya29.fake', 'primary', $older, $event, $stable);
+    $limited = $service->upsert('ya29.fake', 'primary', null, $event, $stable);
+    $requests = HttpClient::recorded();
+
+    assert_true($created['ok']);
+    assert_same('created', $created['action']);
+    assert_same($stable, $created['event_id']);
+    assert_true($updated['ok']);
+    assert_same('updated', $updated['action']);
+    assert_true($recreated['ok']);
+    assert_same('created', $recreated['action']);
+    assert_same('rate_limited', $limited['error_code']);
+    assert_false(strpos($limited['message'], 'private provider detail') !== false, 'provider error text is not returned');
+    assert_same('POST', $requests[0]['method']);
+    assert_same('PATCH', $requests[1]['method']);
+    assert_same('PATCH', $requests[2]['method']);
+    assert_same('POST', $requests[3]['method']);
+    assert_contains('/calendars/primary/events', $requests[0]['url']);
+    assert_contains('/events/' . $stable, $requests[1]['url']);
+    $patch_body = json_decode((string) $requests[1]['body'], true);
+    assert_false(array_key_exists('id', $patch_body), 'PATCH only changes RunPlan-managed fields');
+
+    HttpClient::stop_faking();
+});
+
+test('phase5: CalendarSyncModel refreshes tokens and idempotently syncs upcoming active-plan sessions', function () {
+    if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        return;
+    }
+
+    $db = rp_use_sqlite();
+    $db->raw("INSERT INTO users (email) VALUES ('calendar-sync@example.test')");
+    $user_id = (int) $db->last_id();
+
+    $db->raw(
+        "INSERT INTO training_plans (user_id, goal, start_date, end_date, status)
+         VALUES (?, 'half_marathon', '2099-01-01', '2099-04-01', 'active')",
+        array($user_id)
+    );
+    $plan_id = (int) $db->last_id();
+    $db->raw(
+        "INSERT INTO training_sessions
+            (plan_id, user_id, scheduled_date, planned_start_time, type,
+             planned_distance_km, planned_duration_seconds, status, notes)
+         VALUES (?, ?, '2099-01-02', '07:30:00', 'long', 12.5, 5400, 'planned', 'Keep the pace easy.')",
+        array($plan_id, $user_id)
+    );
+    $session_id = (int) $db->last_id();
+
+    $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    $vault = new TokenVault(str_repeat('0f', 32));
+    $link_model = new CalendarLinkModel();
+    assert_true($link_model->save_tokens($user_id, array(
+        'access_token' => 'ya29.expiring',
+        'refresh_token' => '1//refresh-for-sync',
+        'expires_at' => $now->getTimestamp() + 30,
+        'token_type' => 'Bearer',
+        'scope' => 'https://www.googleapis.com/auth/calendar.events',
+    ), 'https://www.googleapis.com/auth/calendar.events', $vault));
+
+    $config = rp_gcal_config(array('timezone' => 'Asia/Manila'));
+    $oauth = new GoogleCalendarService($config);
+    $events = new GoogleCalendarEventService($config);
+    $model = new CalendarSyncModel();
+    $stable_id = 'r' . hash('sha256', 'runplan-google-calendar:' . $user_id . ':' . $session_id);
+
+    // The first request refreshes the expiring access token; the second creates
+    // the event in the configured timezone.
+    HttpClient::fake(array(
+        array('ok' => true, 'status' => 200, 'body' => json_encode(array(
+            'access_token' => 'ya29.refreshed', 'expires_in' => 3600, 'token_type' => 'Bearer',
+        ))),
+        array('ok' => true, 'status' => 201, 'body' => json_encode(array('id' => $stable_id))),
+    ));
+    $first = $model->sync_for_user($user_id, $oauth, $events, $vault, $now);
+    $first_requests = HttpClient::recorded();
+    HttpClient::stop_faking();
+
+    assert_true($first['ok']);
+    assert_same('synced', $first['status']);
+    assert_same(1, $first['created']);
+    assert_same(0, $first['updated']);
+    assert_same('POST', $first_requests[0]['method'], 'expired access token is refreshed first');
+    assert_contains('oauth2.googleapis.com/token', $first_requests[0]['url']);
+    assert_same('POST', $first_requests[1]['method']);
+    $event_body = json_decode((string) $first_requests[1]['body'], true);
+    assert_same($stable_id, $event_body['id']);
+    assert_same('2099-01-02T07:30:00+08:00', $event_body['start']['dateTime']);
+    assert_same('2099-01-02T09:00:00+08:00', $event_body['end']['dateTime']);
+    assert_same('Asia/Manila', $event_body['start']['timeZone']);
+
+    $stored = $db->raw(
+        'SELECT provider_event_id, sync_status FROM calendar_event_mappings WHERE user_id = ? AND session_id = ?',
+        array($user_id, $session_id)
+    )->fetch(PDO::FETCH_ASSOC);
+    assert_same($stable_id, $stored['provider_event_id']);
+    assert_same('synced', $stored['sync_status']);
+    assert_same('ya29.refreshed', $link_model->tokens_for_user($user_id, $vault)['access_token']);
+    assert_same('connected', $link_model->status_for_user($user_id, true, $vault)['status']);
+
+    // Changing a session then syncing again patches the same Google event rather
+    // than creating a duplicate.
+    $db->raw("UPDATE training_sessions SET scheduled_date = '2099-01-03' WHERE id = ?", array($session_id));
+    HttpClient::fake(array(
+        array('ok' => true, 'status' => 200, 'body' => json_encode(array('id' => $stable_id))),
+    ));
+    $second = $model->sync_for_user($user_id, $oauth, $events, $vault, $now);
+    $second_requests = HttpClient::recorded();
+    HttpClient::stop_faking();
+
+    assert_true($second['ok']);
+    assert_same('synced', $second['status']);
+    assert_same(0, $second['created']);
+    assert_same(1, $second['updated']);
+    assert_same('PATCH', $second_requests[0]['method']);
+    assert_contains('/events/' . $stable_id, $second_requests[0]['url']);
+    assert_same(1, (int) $db->raw('SELECT COUNT(*) FROM calendar_event_mappings')->fetchColumn());
+
+    // Skipping the session removes its Google event and local mapping.
+    $db->raw("UPDATE training_sessions SET status = 'skipped' WHERE id = ?", array($session_id));
+    HttpClient::fake(array(
+        array('ok' => true, 'status' => 204, 'body' => ''),
+    ));
+    $third = $model->sync_for_user($user_id, $oauth, $events, $vault, $now);
+    $third_requests = HttpClient::recorded();
+    HttpClient::stop_faking();
+
+    assert_true($third['ok']);
+    assert_same(1, $third['deleted']);
+    assert_same('DELETE', $third_requests[0]['method']);
+    assert_same(0, (int) $db->raw('SELECT COUNT(*) FROM calendar_event_mappings')->fetchColumn());
 });

@@ -69,6 +69,7 @@ $router->get('/api/calendar/status', 'CalendarSync::status')->middleware('auth')
 $router->get('/api/calendar/connect', 'CalendarSync::connect')->middleware('auth');
 $router->post('/api/calendar/disconnect', 'CalendarSync::disconnect')->middleware('auth');
 $router->post('/api/calendar/sync-enabled', 'CalendarSync::toggle')->middleware('auth');
+$router->post('/api/calendar/sync', 'CalendarEvents::sync')->middleware('auth');
 
 // Public: Google's OAuth redirect lands here. Trust comes from the signed state
 // value, not from a bearer token, so this is the one calendar route without auth.
