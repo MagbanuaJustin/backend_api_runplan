@@ -299,11 +299,31 @@ class Auth extends Controller {
             || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
     }
 
+    /**
+     * Scope the refresh cookie to the API auth path, including any local
+     * subdirectory prefix (for example /runplan_lavalust_api/public).
+     *
+     * @return string
+     */
+    private function refresh_cookie_path()
+    {
+        $request_path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+        $request_path = is_string($request_path) ? $request_path : '';
+        $marker = '/api/auth/';
+        $position = strpos($request_path, $marker);
+
+        if ($position !== false) {
+            return rtrim(substr($request_path, 0, $position), '/') . '/api/auth';
+        }
+
+        return '/api/auth';
+    }
+
     private function set_refresh_cookie($token)
     {
         setcookie('rp_refresh', $token, [
             'expires'  => time() + (int) config_item('refresh_token_expiration'),
-            'path'     => '/api/auth',
+            'path'     => $this->refresh_cookie_path(),
             'secure'   => $this->is_https(),
             'httponly' => true,
             'samesite' => 'Lax',
@@ -314,7 +334,7 @@ class Auth extends Controller {
     {
         setcookie('rp_refresh', '', [
             'expires'  => time() - 3600,
-            'path'     => '/api/auth',
+            'path'     => $this->refresh_cookie_path(),
             'secure'   => $this->is_https(),
             'httponly' => true,
             'samesite' => 'Lax',

@@ -24,6 +24,7 @@ async function request(path, options = {}, retried = false) {
   const res = await fetch(`${API_URL}${path}`, {
     method,
     headers,
+    credentials: 'include', // needed for the HttpOnly refresh cookie when API_URL is cross-origin
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
 
