@@ -87,7 +87,7 @@ $config['integrations'] = array(
         // Where the browser lands after Google's consent screen. The SPA origin,
         // not the API: the callback stores the tokens, then redirects here with
         // ?calendar=connected|denied|...
-        'return_url'    => env('GCAL_RETURN_URL', 'http://localhost:5173/account'),
+        'return_url'    => env('GCAL_RETURN_URL', 'http://localhost:5173/calendar'),
     ),
 
     /*
