@@ -71,7 +71,7 @@ Each phase is independently shippable and leaves the app working. `A`=API repo, 
 - A: `PlanModel::build()` race-date guard fix (`MIN_WEEKS` "too close" vs `MAX_WEEKS` "more than 30 weeks away"), untracked 8 shell-junk files, hardened `.gitignore`.
 - A: `app/libraries/HttpClient.php` — thin zero-dependency cURL wrapper ready for Stage B.
 - A: `app/config/integrations.php` + `app/helpers/integration_helper.php` + `GET /api/integrations/status` — all providers OFF by default (`core_enabled: true`), zero secrets exposed.
-- A: `.env.example` (`DB_NAME=runplandb`), `README.md`, `composer.json`, `scripts/check.sh`, `tests/run.php`, and `.github/workflows/ci.yml`.
+- A: `.env.example` (`DB_NAME=runplandb`), `README.md`, and `composer.json`.
 - A: MVC layering cleanup — `UserModel`, `RefreshTokenModel`, `SessionModel`, `ActivityModel::longest_recent_run_km()`, `?from=&to=` activity date filter, `GET /api/activities/{id}`, `source='manual'` boundary (`D9`), configurable `refresh_token_column` (`D10`), zero `$this->db->…` calls in any controller.
 - A: `AuthMiddleware` (`D11`) wired onto protected routes + `OPTIONS /api/*` CORS preflight (`Health::preflight`).
 

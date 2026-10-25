@@ -10,9 +10,5 @@
     "ext-mbstring": "*",
     "ext-openssl": "*",
     "ext-pdo": "*"
-  },
-  "scripts": {
-    "test": "php tests/run.php",
-    "check": "bash ./scripts/check.sh"
   }
 }

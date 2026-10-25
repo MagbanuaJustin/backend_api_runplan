@@ -566,7 +566,7 @@ class Api
         $expires_at = date('Y-m-d H:i:s', $now + $this->refresh_token_expiration);
 
         $this->_lava->db->raw(
-            "INSERT INTO {$this->refresh_token_table} (user_id, {$this->refresh_token_column}, expires_at, jti) 
+            "INSERT INTO {$this->refresh_token_table} (user_id, {$this->refresh_token_column}, expires_at, jti)
              VALUES (?, ?, ?, ?)",
             [$user_id, $hashed_refresh, $expires_at, $refresh_payload['jti']]
         );

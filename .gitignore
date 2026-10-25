@@ -21,6 +21,7 @@ runtime/*
 # Secrets / local scratch files — never commit these
 #---------------------------------
 .env
+client_secret*.json
 cookies.txt
 old.txt
 before.txt

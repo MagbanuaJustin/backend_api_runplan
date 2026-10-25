@@ -53,21 +53,6 @@ REST API for **RunPlan AI: Adaptive Marathon Training Planner**, built on **Lava
 
 ---
 
-## Running Automated Checks & Tests
-
-No external database or Composer vendor install is needed to run the test suite (uses PHP's built-in tokenizer + in-memory SQLite where needed):
-
-- **Windows (PowerShell / Laragon Terminal):**
-  ```powershell
-  php tests/run.php
-  ```
-- **Git Bash / Linux / macOS / CI:**
-  ```bash
-  ./scripts/check.sh
-  ```
-
----
-
 ## Core API Endpoints (Phase 0)
 
 | Method | Path | Auth | Description |
