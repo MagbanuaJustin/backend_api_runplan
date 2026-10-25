@@ -140,7 +140,10 @@ class HttpClient {
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $errno = curl_errno($ch);
         $errstr = (string) curl_error($ch);
-        curl_close($ch);
+        if (PHP_VERSION_ID < 80000) {
+            curl_close($ch);
+        }
+        unset($ch);
 
         if ($errno !== 0 || !is_string($body)) {
             $code = in_array($errno, array(CURLE_OPERATION_TIMEDOUT, CURLE_COULDNT_CONNECT), true) ? 'timeout'

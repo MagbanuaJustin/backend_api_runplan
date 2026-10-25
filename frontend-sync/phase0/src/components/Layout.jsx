@@ -119,6 +119,15 @@ const NAV_GROUPS = [
     label: 'System',
     items: [
       {
+        to: '/account',
+        label: 'Account & Security',
+        icon: (
+          <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+        ),
+      },
+      {
         to: '/status',
         label: 'System Status',
         icon: (
@@ -139,6 +148,7 @@ const PAGE_TITLES = {
   '/activities': 'Log a Run',
   '/plan': 'Training Plan',
   '/profile': 'Runner Profile',
+  '/account': 'Account & Security',
   '/status': 'System Status',
 }
 
