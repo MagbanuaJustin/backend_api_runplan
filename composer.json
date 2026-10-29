@@ -9,7 +9,8 @@
     "ext-json": "*",
     "ext-mbstring": "*",
     "ext-openssl": "*",
-    "ext-pdo": "*"
+    "ext-pdo": "*",
+    "google/apiclient": "^2.20"
   },
   "scripts": {
     "test": "php tests/run.php",
