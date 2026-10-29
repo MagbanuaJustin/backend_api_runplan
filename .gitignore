@@ -36,3 +36,7 @@ make_session*
 poweshell
 findstr
 curl.exe
+client_secret_*.json
+
+vendor/
+client_secret_*.json
