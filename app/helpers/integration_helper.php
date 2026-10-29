@@ -4,17 +4,14 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 /**
  * Integration helper
  *
- * Small read-side API over app/config/integrations.php so that controllers,
- * models and library classes all ask the same question the same way.
- *
- * Deliberately conservative: a missing provider block is "not ready", never
- * a fatal error, because the core planner has to keep working with nothing
- * configured at all (spec 7.3, NFR-04).
+ * Shared read-side API for app/config/integrations.php.
+ * Missing provider configuration is treated as not ready so optional
+ * integrations do not prevent the core planner from working.
  */
 
 if (!function_exists('integration_config')) {
     /**
-     * Whole config block, or one provider's block.
+     * Return the full integrations config, or one provider's config.
      *
      * @param string|null $provider
      * @return array
@@ -39,11 +36,11 @@ if (!function_exists('integration_config')) {
 
 if (!function_exists('integration_value')) {
     /**
-     * One setting with a fallback, e.g. integration_value('anthropic', 'timeout', 25)
+     * Return one setting with an optional fallback.
      *
      * @param string $provider
      * @param string $key
-     * @param mixed  $default
+     * @param mixed $default
      * @return mixed
      */
     function integration_value($provider, $key, $default = null)
@@ -55,9 +52,8 @@ if (!function_exists('integration_value')) {
 
 if (!function_exists('integration_credential_present')) {
     /**
-     * Does this provider have the secrets it needs? This ignores the kill
-     * switch, so an operator can tell "configured but disabled" apart from
-     * "not configured at all" in the status endpoint.
+     * Check whether a provider has its required credentials.
+     * This does not check whether the provider is enabled.
      *
      * @param string $provider
      * @return bool
@@ -70,36 +66,51 @@ if (!function_exists('integration_credential_present')) {
         }
 
         $required = array(
-            'anthropic'       => array('api_key'),
+            'gemini'          => array('api_key'),
             'openweathermap'  => array('api_key'),
             'google_calendar' => array('client_id', 'client_secret', 'redirect_uri', 'token_aad'),
             'google_identity' => array('client_id'),
-            'recaptcha'       => array('site_key', 'secret'),
-            // Push needs a key pair for one driver and a project for the other.
+            'recaptcha'       => array('project_id', 'api_key', 'site_key', 'allowed_hostnames'),
             'push'            => array(),
         );
 
         if ($provider === 'push') {
-            if (strtolower((string) ($block['driver'] ?? 'vapid')) === 'fcm') {
-                $needed = array('fcm_project');
-            } else {
-                $needed = array('public_key', 'private_key');
-            }
+            $needed = array('worker_token');
+
+               if (strtolower((string) ($block['driver'] ?? 'vapid')) === 'fcm') {
+                    $needed[] = 'fcm_project';
+                } else {
+                    $needed[] = 'public_key';
+                    $needed[] = 'private_key';
+               }
         } else {
             $needed = $required[$provider] ?? array();
         }
 
         foreach ($needed as $key) {
             $value = $block[$key] ?? null;
+
             if (!is_string($value) || trim($value) === '') {
                 return false;
             }
         }
 
-        // reCAPTCHA enterprise authenticates with a project id, not a shared secret.
-        if ($provider === 'recaptcha'
-            && strtolower((string) ($block['version'] ?? '')) === 'enterprise'
-            && trim((string) ($block['project_id'] ?? '')) === '') {
+        if (
+            $provider === 'push'
+           && strlen(trim((string) ($block['worker_token'] ?? ''))) < 32
+        ) {
+         return false;
+        }
+
+        // This installation uses Google Cloud Fraud Defense checkbox keys.
+        if (
+            $provider === 'recaptcha'
+            && !in_array(
+                strtolower((string) ($block['version'] ?? 'checkbox')),
+                array('checkbox', 'v2', 'v2_checkbox'),
+                true
+            )
+        ) {
             return false;
         }
 
@@ -109,7 +120,7 @@ if (!function_exists('integration_credential_present')) {
 
 if (!function_exists('integration_ready')) {
     /**
-     * Enabled AND configured. Every feature gate in the app checks this.
+     * A provider is ready when enabled and fully configured.
      *
      * @param string $provider
      * @return bool
@@ -121,8 +132,11 @@ if (!function_exists('integration_ready')) {
             return false;
         }
 
-        $enabled = $block['enabled'] ?? false;
-        $enabled = filter_var($enabled, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        $enabled = filter_var(
+            $block['enabled'] ?? false,
+            FILTER_VALIDATE_BOOLEAN,
+            FILTER_NULL_ON_FAILURE
+        );
 
         return $enabled === true && integration_credential_present($provider);
     }
@@ -130,58 +144,62 @@ if (!function_exists('integration_ready')) {
 
 if (!function_exists('integration_public_config')) {
     /**
-     * The only shape of this config that may reach a browser: non-secret
-     * booleans and public keys, used by GET /api/integrations.
-     *
-     * Never add a *secret, *private_key, api_key or credential_json here.
+     * Return safe provider configuration for the browser.
+     * Do not add secrets, private keys, or API keys here.
      *
      * @return array
      */
     function integration_public_config()
     {
         return array(
-            'anthropic' => array(
-                'ready'   => integration_ready('anthropic'),
+            'gemini' => array(
+                'ready' => integration_ready('gemini'),
                 'enabled' => (bool) filter_var(
-                    integration_value('anthropic', 'enabled', false),
-                    FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE
+                    integration_value('gemini', 'enabled', false),
+                    FILTER_VALIDATE_BOOLEAN,
+                    FILTER_NULL_ON_FAILURE
                 ),
-                'configured' => integration_credential_present('anthropic'),
-                'model'   => integration_value('anthropic', 'model'),
+                'configured' => integration_credential_present('gemini'),
+                'model' => integration_value('gemini', 'model'),
             ),
             'weather' => array(
-                'ready'          => integration_ready('openweathermap'),
-                'configured'     => integration_credential_present('openweathermap'),
-                'product'        => integration_value('openweathermap', 'product'),
-                'forecast_days'  => (int) integration_value('openweathermap', 'forecast_days', 0),
+                'ready' => integration_ready('openweathermap'),
+                'configured' => integration_credential_present('openweathermap'),
+                'product' => integration_value('openweathermap', 'product'),
+                'forecast_days' => (int) integration_value(
+                    'openweathermap',
+                    'forecast_days',
+                    0
+                ),
             ),
             'google_calendar' => array(
-                'ready'      => integration_ready('google_calendar'),
+                'ready' => integration_ready('google_calendar'),
                 'configured' => integration_credential_present('google_calendar'),
-                'scopes'     => integration_value('google_calendar', 'scopes', array()),
+                'scopes' => integration_value('google_calendar', 'scopes', array()),
             ),
             'push' => array(
-                'ready'      => integration_ready('push'),
+                'ready' => integration_ready('push'),
                 'configured' => integration_credential_present('push'),
-                'driver'     => integration_value('push', 'driver'),
+                'driver' => integration_value('push', 'driver'),
                 'public_key' => integration_value('push', 'public_key'),
             ),
             'google_identity' => array(
-                'ready'      => integration_ready('google_identity'),
+                'ready' => integration_ready('google_identity'),
                 'configured' => integration_credential_present('google_identity'),
-                'client_id'  => integration_value('google_identity', 'client_id'),
+                'client_id' => integration_value('google_identity', 'client_id'),
             ),
             'recaptcha' => array(
-                'ready'      => integration_ready('recaptcha'),
+                'ready' => integration_ready('recaptcha'),
                 'configured' => integration_credential_present('recaptcha'),
-                'version'    => integration_value('recaptcha', 'version'),
-                'site_key'   => integration_value('recaptcha', 'site_key'),
+                'version' => integration_value('recaptcha', 'version'),
+                'site_key' => integration_value('recaptcha', 'site_key'),
+                'assessment_api' => 'Google Cloud Fraud Defense',
                 'required_on' => integration_value('recaptcha', 'require_on', array()),
             ),
             'strava' => array(
-                'ready'      => false,
+                'ready' => false,
                 'configured' => false,
-                'reason'     => 'Disabled pending review of the current Strava API Agreement and Policy.',
+                'reason' => 'Disabled pending review of the current Strava API Agreement and Policy.',
             ),
         );
     }

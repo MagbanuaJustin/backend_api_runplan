@@ -56,6 +56,67 @@ class UserModel extends Model {
             ->get();
     }
 
+    /** Find an external identity by provider and the provider's stable subject. */
+    public function find_identity($provider, $subject)
+    {
+        $provider = strtolower(trim((string) $provider));
+        $subject  = trim((string) $subject);
+
+        if ($provider === '' || strlen($provider) > 30 || $subject === '' || strlen($subject) > 191) {
+            return null;
+        }
+
+        $identity = $this->db->table('user_identities')
+            ->where('provider', $provider)
+            ->where('provider_subject', $subject)
+            ->get();
+
+        return $identity ?: null;
+    }
+
+    /** Attach a provider identity once; never move it between user accounts. */
+    public function attach_google_identity($user_id, $subject)
+    {
+        $user_id = (int) $user_id;
+        $subject = trim((string) $subject);
+
+        if ($user_id < 1 || $subject === '' || strlen($subject) > 191) {
+            return false;
+        }
+
+        $by_subject = $this->find_identity('google', $subject);
+        if ($by_subject) {
+            return (int) $by_subject['user_id'] === $user_id;
+        }
+
+        $by_user = $this->db->table('user_identities')
+            ->where('user_id', $user_id)
+            ->where('provider', 'google')
+            ->get();
+        if ($by_user) {
+            return hash_equals((string) $by_user['provider_subject'], $subject);
+        }
+
+        try {
+            $inserted = $this->db->table('user_identities')->insert([
+                'user_id'          => $user_id,
+                'provider'         => 'google',
+                'provider_subject' => $subject,
+            ]);
+            return (int) $inserted > 0;
+        } catch (\PDOException $e) {
+            // A parallel sign-in may have inserted the same identity first.
+            $existing = $this->find_identity('google', $subject);
+            if ($existing) {
+                return (int) $existing['user_id'] === $user_id;
+            }
+            if ($e->getCode() === '23000') {
+                return false;
+            }
+            throw $e;
+        }
+    }
+
     public function find_active($user_id)
     {
         $user = $this->db->table($this->table)
@@ -87,6 +148,67 @@ class UserModel extends Model {
     // ------------------------------------------------------------------
     // Writes
     // ------------------------------------------------------------------
+
+    /** Create a passwordless runner account and bind its Google identity atomically. */
+    public function create_google_account($email, $subject)
+    {
+        $email   = self::normalise_email($email);
+        $subject = trim((string) $subject);
+
+        if (
+            self::email_problem($email) !== null
+            || $subject === ''
+            || strlen($subject) > 191
+            || $this->find_by_email($email)
+            || $this->find_identity('google', $subject)
+        ) {
+            return null;
+        }
+
+        $this->db->transaction();
+        try {
+            $inserted = $this->db->table($this->table)->insert([
+                'email'         => $email,
+                'password_hash' => null,
+                'role'          => self::ROLE_RUNNER,
+                'status'        => 'active',
+            ]);
+            $user_id = (int) $this->db->last_id();
+
+            if ((int) $inserted < 1 || $user_id < 1) {
+                throw new \RuntimeException('Google account creation did not insert a user.');
+            }
+
+            $identity_inserted = $this->db->table('user_identities')->insert([
+                'user_id'          => $user_id,
+                'provider'         => 'google',
+                'provider_subject' => $subject,
+            ]);
+
+            if ((int) $identity_inserted < 1) {
+                throw new \RuntimeException('Google account identity could not be stored.');
+            }
+
+            $this->db->commit();
+        } catch (\PDOException $e) {
+            $this->db->roll_back();
+            if ($e->getCode() === '23000') {
+                return null;
+            }
+            throw $e;
+        } catch (\Throwable $e) {
+            $this->db->roll_back();
+            throw $e;
+        }
+
+        return $this->find($user_id) ?: [
+            'id'            => $user_id,
+            'email'         => $email,
+            'password_hash' => null,
+            'role'          => self::ROLE_RUNNER,
+            'status'        => 'active',
+        ];
+    }
 
     public function create_password_account($email, $password)
     {

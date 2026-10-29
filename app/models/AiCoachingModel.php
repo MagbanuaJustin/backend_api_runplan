@@ -1,7 +1,7 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
-require_once dirname(__DIR__) . '/libraries/AnthropicService.php';
+require_once dirname(__DIR__) . '/libraries/GeminiService.php';
 
 /**
  * Model: AiCoachingModel
@@ -9,8 +9,8 @@ require_once dirname(__DIR__) . '/libraries/AnthropicService.php';
  * Persists AI / rule-based weekly coaching feedback (`ai_feedback`) and plan
  * generation audit rows (`ai_plan_requests`), enforcing:
  *   1. Strict `source = 'manual'` first-party data boundary (never non-manual runs).
- *   2. Monthly outbound Anthropic call ceiling (`ANTHROPIC_MONTHLY_CALL_CAP`).
- *   3. Automatic deterministic coaching fallback when Anthropic is disabled,
+ *   2. Monthly outbound Gemini call ceiling (`GEMINI_MONTHLY_CALL_CAP`).
+ *   3. Automatic deterministic coaching fallback when Gemini is disabled,
  *      over cap, or unreachable (Spec 5.1 & 7.3 / NFR-04).
  */
 class AiCoachingModel extends Model {
@@ -110,16 +110,16 @@ class AiCoachingModel extends Model {
 
     /**
      * Generates (or refreshes) the runner's 7-day coaching review, calling
-     * Anthropic Claude when ready + under monthly cap, or falling back to
+     * Google Gemini when ready + under monthly cap, or falling back to
      * deterministic rule-based coaching otherwise.
      */
-    public function generate_weekly_feedback($user_id, ?DateTimeImmutable $today = null, ?AnthropicService $service = null)
+    public function generate_weekly_feedback($user_id, ?DateTimeImmutable $today = null, ?GeminiService $service = null)
     {
         $this->ensure_tables();
 
         $uid     = (int) $user_id;
         $ref     = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
-        $client  = $service ?: new AnthropicService();
+        $client  = $service ?: new GeminiService();
         $metrics = $this->build_weekly_metrics($uid, $ref);
 
         if (!$client->is_ready()) {
@@ -145,6 +145,51 @@ class AiCoachingModel extends Model {
             $text,
             $status
         );
+    }
+
+    /**
+     * Answers an unsaved chat question using only a short window of this
+     * runner's first-party training metrics. Message contents are not logged.
+     */
+    public function answer_chat_question($user_id, $question, ?DateTimeImmutable $today = null, ?GeminiService $service = null)
+    {
+        $this->ensure_tables();
+
+        $uid = (int) $user_id;
+        $question = trim((string) $question);
+        if ($question === '' || mb_strlen($question) > 1000) {
+            return array('ok' => false, 'text' => null, 'provider_status' => 'invalid_request', 'error' => 'Enter a question under 1000 characters.');
+        }
+
+        $ref = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
+        $client = $service ?: new GeminiService();
+        if (!$client->is_ready()) {
+            return array('ok' => false, 'text' => null, 'provider_status' => 'not_configured', 'error' => 'Google Gemini is disabled or not configured.');
+        }
+        if ($this->monthly_calls_used($ref) >= $client->monthly_cap()) {
+            return array('ok' => false, 'text' => null, 'provider_status' => 'cap_reached', 'error' => 'The monthly Gemini call limit has been reached.');
+        }
+
+        $metrics = $this->build_weekly_metrics($uid, $ref);
+        $result = $client->generate_chat_answer($question, $metrics);
+
+        // Keep a countable audit entry, but never store the chat text.
+        if (($result['provider_status'] ?? '') !== 'invalid_request') {
+            try {
+                $this->db->table('ai_plan_requests')->insert(array(
+                    'user_id' => $uid,
+                    'plan_id' => null,
+                    'provider' => 'gemini',
+                    'status' => !empty($result['ok']) ? 'succeeded' : 'failed',
+                    'request_summary' => 'kind=chat chars=' . (int) mb_strlen($question),
+                    'created_at' => gmdate('Y-m-d H:i:s'),
+                ));
+            } catch (Throwable $e) {
+                // Chat still works if the optional audit write is unavailable.
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -196,12 +241,12 @@ class AiCoachingModel extends Model {
      * a concise coaching brief (`['text' => string, 'provider_status' => string]`).
      * Distances and dates remain 100% governed by `PlanModel::build()`.
      */
-    public function record_plan_generation($user_id, $plan_id, array $profile, array $built, ?DateTimeImmutable $today = null, ?AnthropicService $service = null)
+    public function record_plan_generation($user_id, $plan_id, array $profile, array $built, ?DateTimeImmutable $today = null, ?GeminiService $service = null)
     {
         $uid    = (int) $user_id;
         $pid    = $plan_id !== null ? (int) $plan_id : null;
         $ref    = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
-        $client = $service ?: new AnthropicService();
+        $client = $service ?: new GeminiService();
 
         $sessions = $built['sessions'] ?? array();
         $total_km = 0.0;
@@ -259,7 +304,7 @@ class AiCoachingModel extends Model {
             $this->db->table('ai_plan_requests')->insert(array(
                 'user_id'         => $uid,
                 'plan_id'         => $pid,
-                'provider'        => 'anthropic',
+                'provider'        => 'gemini',
                 'status'          => $req_status,
                 'request_summary' => mb_substr($summary_line, 0, 500),
                 'created_at'      => gmdate('Y-m-d H:i:s'),
@@ -344,7 +389,7 @@ class AiCoachingModel extends Model {
         try {
             $plan_calls = (int) $this->db->raw(
                 "SELECT COUNT(*) FROM ai_plan_requests
-                  WHERE provider = 'anthropic'
+                  WHERE provider = 'gemini'
                     AND status IN ('succeeded', 'failed')
                     AND created_at >= ?",
                 array($month_start)

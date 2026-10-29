@@ -6,7 +6,7 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
  *
  * Why this exists as its own class:
  *
- *   - Every provider call (Anthropic, OpenWeatherMap, Google, FCM) needs the
+ *   - Every provider call (Gemini, OpenWeatherMap, Google, FCM) needs the
  *     same boring guarantees: a hard timeout, a response size cap, JSON
  *     decoding that cannot emit notices, and one error shape. Doing that at
  *     each call site is how you end up with a provider outage taking the
@@ -104,7 +104,7 @@ class HttpClient {
         }
 
         $ch = curl_init();
-        curl_setopt_array($ch, array(
+        $curl_options = array(
             CURLOPT_URL            => $url,
             CURLOPT_CUSTOMREQUEST  => $method,
             CURLOPT_RETURNTRANSFER => true,
@@ -113,13 +113,22 @@ class HttpClient {
             CURLOPT_TIMEOUT        => $timeout,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_CAINFO         => $this->ca_bundle(),   // null = system store
             CURLOPT_MAXREDIRS      => 0,
             CURLOPT_PROTOCOLS      => CURLPROTO_HTTP | CURLPROTO_HTTPS,
             CURLOPT_ENCODING       => '',             // accept gzip/deflate if offered, decoded for us
             CURLOPT_HEADER         => false,
             CURLOPT_NOSIGNAL       => 1,              // timeouts must work even without pcntl
-        ));
+        );
+
+        // Do not pass CURLOPT_CAINFO=null: on some cURL builds this is treated
+        // as an empty trust-anchor filename instead of using the system store.
+        // Only override cURL's default trust store when a readable HTTP bundle
+        // was explicitly configured.
+        $ca_bundle = $this->ca_bundle();
+        if ($ca_bundle !== null) {
+            $curl_options[CURLOPT_CAINFO] = $ca_bundle;
+        }
+        curl_setopt_array($ch, $curl_options);
 
         if ($payload !== null) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
@@ -339,21 +348,21 @@ class HttpClient {
     }
 
     /**
-     * Reuse the same CA bundle the database connection uses when one is set,
-     * otherwise let cURL use the system store. Mirrors app/config/database.php
-     * so a host that needs a private CA for MySQL needs no second knob for HTTP.
+     * Use an optional HTTP CA bundle; otherwise let cURL use its configured
+     * system/default trust store. Database TLS configuration is independent.
      *
      * @return string|null
      */
     private function ca_bundle()
     {
-        $ca = function_exists('env') ? env('DB_SSL_CA') : '';
-        if (is_string($ca) && $ca !== '') {
-            $path = (defined('ROOT_DIR') ? ROOT_DIR : '') . $ca;
-            if (is_readable($path)) {
-                return $path;
-            }
+        $ca = function_exists('env') ? env('HTTP_CA_BUNDLE', '') : '';
+        if (!is_string($ca) || trim($ca) === '') {
+            return null;
         }
-        return null;
+
+        $ca = trim($ca);
+        $is_absolute = preg_match('/^(?:[A-Za-z]:[\\\\\/]|\\\\\\\\|\/)/', $ca) === 1;
+        $path = $is_absolute ? $ca : ((defined('ROOT_DIR') ? ROOT_DIR : '') . $ca);
+        return is_readable($path) ? $path : null;
     }
 }

@@ -4,15 +4,9 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 /**
  * Controller: Auth
  *
-<<<<<<< HEAD
- * Core first-party email/password authentication, password recovery, and
- * rotating HttpOnly refresh sessions. All persistence and validation rules
- * live in Models (zero controller-level SQL).
-=======
  * Core first-party email/password authentication, Google sign-in, password
  * recovery, and rotating HttpOnly refresh sessions. Persistence and
  * validation rules live in Models.
->>>>>>> backup/local-arena
  */
 class Auth extends Controller
 {
@@ -27,7 +21,7 @@ class Auth extends Controller
         $this->api->rate_limit('register_' . ($_SERVER['REMOTE_ADDR'] ?? 'x'), 5, 600);
 
         $input = $this->read_json();
-        $this->verify_recaptcha($input, 'register');
+        $this->verify_recaptcha($input);
 
         $email    = UserModel::normalise_email($input['email'] ?? '');
         $password = (string) ($input['password'] ?? '');
@@ -48,15 +42,11 @@ class Auth extends Controller
             $this->api->respond_error('That email is already registered.', 409);
         }
 
-<<<<<<< HEAD
-        $this->SecurityEventModel->record('account_registered', (int) $user['id'], ['method' => 'password']);
-=======
         $this->SecurityEventModel->record(
             'account_registered',
             (int) $user['id'],
             ['method' => 'password']
         );
->>>>>>> backup/local-arena
 
         $this->api->respond([
             'data' => [
@@ -79,7 +69,7 @@ class Auth extends Controller
         $this->api->rate_limit('login_' . $ip, 10, 600);
 
         $input = $this->read_json();
-        $this->verify_recaptcha($input, 'login');
+        $this->verify_recaptcha($input);
 
         $email    = UserModel::normalise_email($input['email'] ?? '');
         $password = (string) ($input['password'] ?? '');
@@ -92,29 +82,15 @@ class Auth extends Controller
 
         $user = $this->UserModel->authenticate($email, $password);
         if (!$user) {
-<<<<<<< HEAD
-            $this->SecurityEventModel->record('login_failed', null, ['reason' => 'invalid_credentials']);
-=======
             $this->SecurityEventModel->record(
                 'login_failed',
                 null,
                 ['reason' => 'invalid_credentials']
             );
->>>>>>> backup/local-arena
             $this->api->respond_error('Invalid email or password.', 401);
         }
 
         if (!$this->UserModel->is_active($user)) {
-<<<<<<< HEAD
-            $this->SecurityEventModel->record('login_blocked', (int) $user['id'], ['reason' => 'inactive']);
-            $this->api->respond_error('This account is not active.', 403);
-        }
-
-        $this->SecurityEventModel->record('login_succeeded', (int) $user['id'], ['method' => 'password']);
-        $this->start_session($user);
-    }
-
-=======
             $this->SecurityEventModel->record(
                 'login_blocked',
                 (int) $user['id'],
@@ -149,7 +125,7 @@ class Auth extends Controller
         $this->api->rate_limit('google_login_' . $ip, 10, 600);
 
         $input = $this->read_json();
-        $this->verify_recaptcha($input, 'google_login');
+        $this->verify_recaptcha($input);
 
         $credential = trim((string) ($input['credential'] ?? ''));
 
@@ -337,7 +313,6 @@ class Auth extends Controller
         $this->start_session($user);
     }
 
->>>>>>> backup/local-arena
     public function forgot_password()
     {
         $this->call->library('api');
@@ -351,13 +326,7 @@ class Auth extends Controller
         $this->api->rate_limit('forgot_' . $ip, 8, 600);
 
         $input = $this->read_json();
-<<<<<<< HEAD
-        $email = UserModel::normalise_email($input['email'] ?? '');
-
-        if ($problem = UserModel::email_problem($email)) {
-            $this->api->respond(['error' => 'Validation failed', 'fields' => ['email' => $problem]], 422);
-=======
-        $this->verify_recaptcha($input, 'forgot_password');
+        $this->verify_recaptcha($input);
 
         $email = UserModel::normalise_email($input['email'] ?? '');
 
@@ -366,16 +335,11 @@ class Auth extends Controller
                 'error'  => 'Validation failed',
                 'fields' => ['email' => $problem],
             ], 422);
->>>>>>> backup/local-arena
         }
 
         $this->api->rate_limit('forgot_email_' . md5($email), 5, 600);
 
-<<<<<<< HEAD
-        // Anti-enumeration: identical neutral message regardless of account existence
-=======
         // Keep the response the same whether or not the account exists.
->>>>>>> backup/local-arena
         $data = [
             'ok'      => true,
             'message' => 'If an account matches that email, password reset instructions have been generated.',
@@ -384,13 +348,6 @@ class Auth extends Controller
         $user = $this->UserModel->find_by_email($email);
         if ($user && $this->UserModel->is_active($user)) {
             $issued = $this->PasswordResetModel->issue((int) $user['id']);
-<<<<<<< HEAD
-            $this->SecurityEventModel->record('password_reset_requested', (int) $user['id'], [
-                'ttl_minutes' => $issued['ttl_minutes'],
-            ]);
-
-            if (env('APP_ENV', 'development') === 'development' && env('PASSWORD_RESET_DEV_PREVIEW', 'true') === 'true') {
-=======
             $this->SecurityEventModel->record(
                 'password_reset_requested',
                 (int) $user['id'],
@@ -402,7 +359,6 @@ class Auth extends Controller
                 strtolower((string) env('APP_ENV', 'production')) === 'development'
                 && strtolower((string) env('PASSWORD_RESET_DEV_PREVIEW', 'false')) === 'true'
             ) {
->>>>>>> backup/local-arena
                 $data['dev_reset'] = [
                     'token'              => $issued['token'],
                     'reset_path'         => '/reset-password?token=' . rawurlencode($issued['token']),
@@ -430,13 +386,9 @@ class Auth extends Controller
         $this->api->require_method('POST');
         $this->api->rate_limit('reset_' . ($_SERVER['REMOTE_ADDR'] ?? 'x'), 10, 600);
 
-<<<<<<< HEAD
-        $input    = $this->read_json();
-=======
         $input = $this->read_json();
-        $this->verify_recaptcha($input, 'reset_password');
+        $this->verify_recaptcha($input);
 
->>>>>>> backup/local-arena
         $token    = trim((string) ($input['token'] ?? ''));
         $password = (string) ($input['password'] ?? '');
 
@@ -453,10 +405,6 @@ class Auth extends Controller
 
         $consumed = $this->PasswordResetModel->consume($token);
         if (!$consumed) {
-<<<<<<< HEAD
-            $this->SecurityEventModel->record('password_reset_failed', null, ['reason' => 'invalid_or_expired']);
-            $this->api->respond_error('That reset link is invalid or has expired. Request a new one.', 400);
-=======
             $this->SecurityEventModel->record(
                 'password_reset_failed',
                 null,
@@ -466,7 +414,6 @@ class Auth extends Controller
                 'That reset link is invalid or has expired. Request a new one.',
                 400
             );
->>>>>>> backup/local-arena
         }
 
         $uid  = (int) $consumed['user_id'];
@@ -479,17 +426,11 @@ class Auth extends Controller
         $revoked = $this->RefreshTokenModel->revoke_all_for_user($uid);
         $this->clear_refresh_cookie();
 
-<<<<<<< HEAD
-        $this->SecurityEventModel->record('password_reset_completed', $uid, [
-            'revoked_sessions' => $revoked,
-        ]);
-=======
         $this->SecurityEventModel->record(
             'password_reset_completed',
             $uid,
             ['revoked_sessions' => $revoked]
         );
->>>>>>> backup/local-arena
 
         header('Cache-Control: no-store');
         $this->api->respond([
@@ -584,13 +525,11 @@ class Auth extends Controller
     }
 
     /**
-     * Verify a Google reCAPTCHA v3 response token.
-     *
-     * CAPTCHA remains optional until RECAPTCHA_ENABLED=true is set in the
-     * backend environment. Once enabled, a missing or invalid server secret
-     * fails closed so protected auth routes are not silently left unverified.
+     * Verify a Google Cloud Fraud Defense checkbox response token by
+     * creating a server-side assessment. The API key is restricted to the
+     * reCAPTCHA Enterprise API and is never sent to the browser.
      */
-    private function verify_recaptcha(array $input, string $expected_action)
+    private function verify_recaptcha(array $input)
     {
         $enabled = strtolower(trim((string) env('RECAPTCHA_ENABLED', 'false'))) === 'true';
 
@@ -598,9 +537,22 @@ class Auth extends Controller
             return;
         }
 
-        $secret = trim((string) env('RECAPTCHA_SECRET_KEY', ''));
+        $version = strtolower(trim((string) env('RECAPTCHA_VERSION', 'checkbox')));
+        if (!in_array($version, array('checkbox', 'v2', 'v2_checkbox'), true)) {
+            $this->api->respond_error('The server must use a reCAPTCHA checkbox key.', 503);
+        }
 
-        if ($secret === '') {
+        $project_id = trim((string) env('RECAPTCHA_PROJECT_ID', ''));
+        $api_key = trim((string) env('RECAPTCHA_API_KEY', ''));
+        $site_key = trim((string) env('RECAPTCHA_SITE_KEY', ''));
+        $allowed_hostnames = array_values(array_filter(array_map(
+            static function ($hostname) {
+                return strtolower(trim($hostname));
+            },
+            explode(',', (string) env('RECAPTCHA_ALLOWED_HOSTNAMES', ''))
+        )));
+
+        if ($project_id === '' || $api_key === '' || $site_key === '' || !$allowed_hostnames) {
             $this->api->respond_error('Human verification is not configured on the server.', 503);
         }
 
@@ -614,7 +566,24 @@ class Auth extends Controller
             $this->api->respond_error('Human verification is unavailable on this server.', 503);
         }
 
-        $curl = curl_init('https://www.google.com/recaptcha/api/siteverify');
+        $timeout = max(3, min(20, (int) env('RECAPTCHA_TIMEOUT', 10)));
+        $endpoint = 'https://recaptchaenterprise.googleapis.com/v1/projects/'
+            . rawurlencode($project_id)
+            . '/assessments?key=' . rawurlencode($api_key);
+        $request_body = json_encode(array(
+            'event' => array(
+                'token'          => $token,
+                'siteKey'        => $site_key,
+                'userAgent'      => substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 1024),
+                'userIpAddress'  => (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
+            ),
+        ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        if (!is_string($request_body)) {
+            $this->api->respond_error('Human verification is temporarily unavailable.', 503);
+        }
+
+        $curl = curl_init($endpoint);
 
         if ($curl === false) {
             $this->api->respond_error('Human verification is temporarily unavailable.', 503);
@@ -622,27 +591,21 @@ class Auth extends Controller
 
         curl_setopt_array($curl, [
             CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => http_build_query([
-                'secret'   => $secret,
-                'response' => $token,
-                'remoteip' => $_SERVER['REMOTE_ADDR'] ?? '',
-            ]),
-            CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded'],
+            CURLOPT_POSTFIELDS     => $request_body,
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'Accept: application/json'],
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CONNECTTIMEOUT => 5,
-            CURLOPT_TIMEOUT        => 10,
+            CURLOPT_CONNECTTIMEOUT => min(5, $timeout),
+            CURLOPT_TIMEOUT        => $timeout,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
         ]);
 
         $response_body = curl_exec($curl);
         $http_status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-        $curl_error = curl_error($curl);
         curl_close($curl);
 
         if (
             !is_string($response_body)
-            || $curl_error !== ''
             || $http_status < 200
             || $http_status >= 300
         ) {
@@ -651,17 +614,16 @@ class Auth extends Controller
 
         $verification = json_decode($response_body, true);
 
-        if (!is_array($verification) || empty($verification['success'])) {
+        if (!is_array($verification)) {
             $this->api->respond_error('Human verification failed. Please try again.', 422);
         }
 
-        $verified_hostname = strtolower(trim((string) ($verification['hostname'] ?? '')));
-        $allowed_hostnames = array_values(array_filter(array_map(
-            static function ($hostname) {
-                return strtolower(trim($hostname));
-            },
-            explode(',', (string) env('RECAPTCHA_ALLOWED_HOSTNAMES', ''))
-        )));
+        $token_properties = $verification['tokenProperties'] ?? array();
+        if (!is_array($token_properties) || empty($token_properties['valid'])) {
+            $this->api->respond_error('Human verification failed. Please try again.', 422);
+        }
+
+        $verified_hostname = strtolower(trim((string) ($token_properties['hostname'] ?? '')));
 
         if (
             $verified_hostname === ''
@@ -669,19 +631,6 @@ class Auth extends Controller
             || !in_array($verified_hostname, $allowed_hostnames, true)
         ) {
             $this->api->respond_error('Human verification could not be confirmed for this site.', 422);
-        }
-
-        $verified_action = (string) ($verification['action'] ?? '');
-
-        if (!hash_equals($expected_action, $verified_action)) {
-            $this->api->respond_error('Human verification action did not match.', 422);
-        }
-
-        $score = $verification['score'] ?? null;
-        $minimum_score = (float) env('RECAPTCHA_MIN_SCORE', 0.5);
-
-        if (!is_numeric($score) || (float) $score < $minimum_score) {
-            $this->api->respond_error('Human verification was not successful. Please try again.', 422);
         }
     }
 
@@ -719,14 +668,10 @@ class Auth extends Controller
      */
     private function refresh_cookie_path()
     {
-<<<<<<< HEAD
-        $request_path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
-=======
         $request_path = parse_url(
             (string) ($_SERVER['REQUEST_URI'] ?? ''),
             PHP_URL_PATH
         );
->>>>>>> backup/local-arena
         $request_path = is_string($request_path) ? $request_path : '';
         $marker = '/api/auth/';
         $position = strpos($request_path, $marker);

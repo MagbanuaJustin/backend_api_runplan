@@ -9,15 +9,7 @@
     "ext-json": "*",
     "ext-mbstring": "*",
     "ext-openssl": "*",
-<<<<<<< HEAD
-    "ext-pdo": "*"
-=======
     "ext-pdo": "*",
     "google/apiclient": "^2.20"
-  },
-  "scripts": {
-    "test": "php tests/run.php",
-    "check": "bash ./scripts/check.sh"
->>>>>>> backup/local-arena
   }
 }
