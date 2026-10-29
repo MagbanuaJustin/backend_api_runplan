@@ -339,6 +339,13 @@ class Auth extends Controller
 
         $this->api->rate_limit('forgot_email_' . md5($email), 5, 600);
 
+        $dev_preview_enabled =
+            strtolower((string) env('APP_ENV', 'production')) === 'development'
+            && strtolower((string) env('PASSWORD_RESET_DEV_PREVIEW', 'false')) === 'true';
+        if (!$this->password_reset_email_is_configured() && !$dev_preview_enabled) {
+            $this->api->respond_error('Password recovery email is not configured on this server.', 503);
+        }
+
         // Keep the response the same whether or not the account exists.
         $data = [
             'ok'      => true,
@@ -352,6 +359,16 @@ class Auth extends Controller
                 'password_reset_requested',
                 (int) $user['id'],
                 ['ttl_minutes' => $issued['ttl_minutes']]
+            );
+
+            // Keep the public response neutral to avoid revealing whether an
+            // account exists. Delivery failures are recorded only in server
+            // logs and the privacy-safe security event table.
+            $email_sent = $this->send_password_reset_email($email, $issued['token']);
+            $this->SecurityEventModel->record(
+                $email_sent ? 'password_reset_email_sent' : 'password_reset_email_failed',
+                (int) $user['id'],
+                ['provider' => 'resend']
             );
 
             // Only allow the token preview with explicit development settings.
@@ -522,6 +539,132 @@ class Auth extends Controller
         }
 
         return $input;
+    }
+
+    /**
+     * Send the one-time reset link through Resend's HTTPS API. Using HTTPS
+     * avoids SMTP ports that are unavailable on Render's free web services.
+     * The API key is read only from the server environment and is never
+     * returned to the browser or written to logs.
+     */
+    private function send_password_reset_email($recipient, $raw_token)
+    {
+        $api_key = trim((string) env('RESEND_API_KEY', ''));
+        $from = trim((string) env('RESEND_FROM_EMAIL', ''));
+        $frontend_url = rtrim(trim((string) env('FRONTEND_URL', '')), '/');
+        $app_env = strtolower(trim((string) env('APP_ENV', 'production')));
+
+        if ($api_key === '' || $from === '' || $frontend_url === '') {
+            error_log('[RunPlan password reset] Resend is not configured; recovery email was not sent.');
+            return false;
+        }
+
+        $frontend_parts = parse_url($frontend_url);
+        $frontend_scheme = strtolower((string) ($frontend_parts['scheme'] ?? ''));
+        $frontend_host = trim((string) ($frontend_parts['host'] ?? ''));
+        if (
+            !filter_var($frontend_url, FILTER_VALIDATE_URL)
+            || $frontend_host === ''
+            || !in_array($frontend_scheme, ['https', 'http'], true)
+            || ($app_env === 'production' && $frontend_scheme !== 'https')
+        ) {
+            error_log('[RunPlan password reset] FRONTEND_URL is invalid; recovery email was not sent.');
+            return false;
+        }
+
+        if (!function_exists('curl_init')) {
+            error_log('[RunPlan password reset] cURL is unavailable; recovery email was not sent.');
+            return false;
+        }
+
+        $reset_url = $frontend_url . '/reset-password?token=' . rawurlencode((string) $raw_token);
+        $safe_reset_url = htmlspecialchars($reset_url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $payload = json_encode([
+            'from'    => $from,
+            'to'      => [(string) $recipient],
+            'subject' => 'Reset your RunPlan password',
+            'html'    => '<!doctype html><html><body style="font-family:Arial,sans-serif;color:#18233a;line-height:1.5">'
+                . '<h1>Reset your RunPlan password</h1>'
+                . '<p>We received a request to reset the password for your RunPlan account.</p>'
+                . '<p><a href="' . $safe_reset_url . '" style="display:inline-block;padding:12px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px">'
+                . 'Choose a new password</a></p>'
+                . '<p>This link expires in ' . (int) PasswordResetModel::TTL_MINUTES . ' minutes and can be used once.</p>'
+                . '<p>If you did not request this, you can ignore this email.</p>'
+                . '<p>If the button does not work, copy this address into your browser:<br>'
+                . $safe_reset_url . '</p></body></html>',
+            'text'    => "We received a request to reset your RunPlan password.\n\n"
+                . "Choose a new password using this one-time link (expires in "
+                . (int) PasswordResetModel::TTL_MINUTES . " minutes):\n"
+                . $reset_url . "\n\nIf you did not request this, ignore this email.",
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        if (!is_string($payload)) {
+            error_log('[RunPlan password reset] Could not encode the Resend request; recovery email was not sent.');
+            return false;
+        }
+
+        $curl = curl_init('https://api.resend.com/emails');
+        if ($curl === false) {
+            error_log('[RunPlan password reset] Could not initialize Resend request.');
+            return false;
+        }
+
+        curl_setopt_array($curl, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_HTTPHEADER     => [
+                'Authorization: Bearer ' . $api_key,
+                'Content-Type: application/json',
+                'Accept: application/json',
+            ],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT        => 15,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_PROTOCOLS      => CURLPROTO_HTTPS,
+        ]);
+
+        $response_body = curl_exec($curl);
+        $http_status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+        $curl_error_number = curl_errno($curl);
+        curl_close($curl);
+
+        if (!is_string($response_body) || $http_status < 200 || $http_status >= 300) {
+            $provider_error = '';
+            if (is_string($response_body)) {
+                $response = json_decode($response_body, true);
+                if (is_array($response)) {
+                    $provider_error = preg_replace(
+                        '/[^A-Za-z0-9_.-]/',
+                        '',
+                        substr((string) ($response['name'] ?? ''), 0, 80)
+                    );
+                }
+            }
+
+            error_log(sprintf(
+                '[RunPlan password reset] Resend request failed (HTTP %d, cURL %d, provider error %s).',
+                $http_status,
+                $curl_error_number,
+                $provider_error !== '' ? $provider_error : 'unavailable'
+            ));
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Check required settings before querying for the email address so an
+     * unavailable email provider cannot reveal whether an account exists.
+     */
+    private function password_reset_email_is_configured()
+    {
+        return trim((string) env('RESEND_API_KEY', '')) !== ''
+            && trim((string) env('RESEND_FROM_EMAIL', '')) !== ''
+            && trim((string) env('FRONTEND_URL', '')) !== ''
+            && function_exists('curl_init');
     }
 
     /**
