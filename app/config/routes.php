@@ -28,7 +28,6 @@ $router->post('/api/auth/refresh', 'Auth::refresh');
 $router->post('/api/auth/logout', 'Auth::logout');
 $router->post('/api/auth/forgot-password', 'Auth::forgot_password');
 $router->post('/api/auth/reset-password', 'Auth::reset_password');
-
 $router->get('/api/auth/me', 'Auth::me')->middleware('auth');
 
 $router->get('/api/account', 'Account::show')->middleware('auth');
@@ -59,7 +58,6 @@ $router->get('/api/plans/{id}/revisions', 'Plans::revisions')->middleware('auth'
 
 $router->patch('/api/sessions/{id}', 'Sessions::update')->middleware('auth');
 $router->get('/api/dashboard', 'Dashboard::index')->middleware('auth');
-
 $router->get('/api/ai/feedback', 'AiCoaching::show')->middleware('auth');
 $router->post('/api/ai/feedback', 'AiCoaching::generate')->middleware('auth');
 $router->post('/api/ai/chat', 'AiCoaching::chat')->middleware('auth');
@@ -81,9 +79,15 @@ $router->post('/api/calendar/sync-enabled', 'CalendarSync::toggle')->middleware(
 $router->get('/calendar/callback', 'CalendarSync::callback');
 $router->post('/api/calendar/sync', 'CalendarEvents::sync')->middleware('auth');
 
-// Runner problem reports and admin-only support operations.
+// Runner reports and administrator-only Support Console actions.
 $router->get('/api/support/reports', 'Support::reports')->middleware('auth');
 $router->post('/api/support/reports', 'Support::create_report')->middleware('auth');
 $router->patch('/api/support/reports/{id}', 'Support::update_report')->middleware('auth');
 $router->get('/api/support/console', 'Support::console')->middleware('auth');
 $router->get('/api/support/system', 'Support::system')->middleware('auth');
+$router->get('/api/support/users/{id}', 'Support::runner')->middleware('auth');
+$router->patch('/api/support/users/{id}/status', 'Support::update_runner_status')->middleware('auth');
+$router->patch('/api/support/users/{id}/password', 'Support::update_runner_password')->middleware('auth');
+$router->get('/api/support/backups', 'Support::backups')->middleware('auth');
+$router->post('/api/support/backups', 'Support::create_backup')->middleware('auth');
+$router->get('/api/support/backups/{id}', 'Support::download_backup')->middleware('auth');
