@@ -368,7 +368,7 @@ class Auth extends Controller
             $this->SecurityEventModel->record(
                 $email_sent ? 'password_reset_email_sent' : 'password_reset_email_failed',
                 (int) $user['id'],
-                ['provider' => 'resend']
+                ['provider' => 'brevo']
             );
 
             // Only allow the token preview with explicit development settings.
@@ -542,20 +542,20 @@ class Auth extends Controller
     }
 
     /**
-     * Send the one-time reset link through Resend's HTTPS API. Using HTTPS
+     * Send the one-time reset link through Brevo's HTTPS API. Using HTTPS
      * avoids SMTP ports that are unavailable on Render's free web services.
      * The API key is read only from the server environment and is never
      * returned to the browser or written to logs.
      */
     private function send_password_reset_email($recipient, $raw_token)
     {
-        $api_key = trim((string) env('RESEND_API_KEY', ''));
-        $from = trim((string) env('RESEND_FROM_EMAIL', ''));
+        $api_key = trim((string) env('BREVO_API_KEY', ''));
+        $from_email = trim((string) env('BREVO_FROM_EMAIL', ''));
         $frontend_url = rtrim(trim((string) env('FRONTEND_URL', '')), '/');
         $app_env = strtolower(trim((string) env('APP_ENV', 'production')));
 
-        if ($api_key === '' || $from === '' || $frontend_url === '') {
-            error_log('[RunPlan password reset] Resend is not configured; recovery email was not sent.');
+        if ($api_key === '' || $from_email === '' || $frontend_url === '') {
+            error_log('[RunPlan password reset] Brevo is not configured; recovery email was not sent.');
             return false;
         }
 
@@ -580,10 +580,13 @@ class Auth extends Controller
         $reset_url = $frontend_url . '/reset-password?token=' . rawurlencode((string) $raw_token);
         $safe_reset_url = htmlspecialchars($reset_url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $payload = json_encode([
-            'from'    => $from,
-            'to'      => [(string) $recipient],
+            'sender'  => [
+                'name'  => trim((string) env('BREVO_FROM_NAME', 'RunPlan')) ?: 'RunPlan',
+                'email' => $from_email,
+            ],
+            'to'      => [['email' => (string) $recipient]],
             'subject' => 'Reset your RunPlan password',
-            'html'    => '<!doctype html><html><body style="font-family:Arial,sans-serif;color:#18233a;line-height:1.5">'
+            'htmlContent' => '<!doctype html><html><body style="font-family:Arial,sans-serif;color:#18233a;line-height:1.5">'
                 . '<h1>Reset your RunPlan password</h1>'
                 . '<p>We received a request to reset the password for your RunPlan account.</p>'
                 . '<p><a href="' . $safe_reset_url . '" style="display:inline-block;padding:12px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px">'
@@ -592,20 +595,20 @@ class Auth extends Controller
                 . '<p>If you did not request this, you can ignore this email.</p>'
                 . '<p>If the button does not work, copy this address into your browser:<br>'
                 . $safe_reset_url . '</p></body></html>',
-            'text'    => "We received a request to reset your RunPlan password.\n\n"
+            'textContent' => "We received a request to reset your RunPlan password.\n\n"
                 . "Choose a new password using this one-time link (expires in "
                 . (int) PasswordResetModel::TTL_MINUTES . " minutes):\n"
                 . $reset_url . "\n\nIf you did not request this, ignore this email.",
         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
         if (!is_string($payload)) {
-            error_log('[RunPlan password reset] Could not encode the Resend request; recovery email was not sent.');
+            error_log('[RunPlan password reset] Could not encode the Brevo request; recovery email was not sent.');
             return false;
         }
 
-        $curl = curl_init('https://api.resend.com/emails');
+        $curl = curl_init('https://api.brevo.com/v3/smtp/email');
         if ($curl === false) {
-            error_log('[RunPlan password reset] Could not initialize Resend request.');
+            error_log('[RunPlan password reset] Could not initialize Brevo request.');
             return false;
         }
 
@@ -613,7 +616,7 @@ class Auth extends Controller
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => $payload,
             CURLOPT_HTTPHEADER     => [
-                'Authorization: Bearer ' . $api_key,
+                'api-key: ' . $api_key,
                 'Content-Type: application/json',
                 'Accept: application/json',
             ],
@@ -638,13 +641,13 @@ class Auth extends Controller
                     $provider_error = preg_replace(
                         '/[^A-Za-z0-9_.-]/',
                         '',
-                        substr((string) ($response['name'] ?? ''), 0, 80)
+                        substr((string) ($response['code'] ?? ''), 0, 80)
                     );
                 }
             }
 
             error_log(sprintf(
-                '[RunPlan password reset] Resend request failed (HTTP %d, cURL %d, provider error %s).',
+                '[RunPlan password reset] Brevo request failed (HTTP %d, cURL %d, provider error %s).',
                 $http_status,
                 $curl_error_number,
                 $provider_error !== '' ? $provider_error : 'unavailable'
@@ -661,8 +664,8 @@ class Auth extends Controller
      */
     private function password_reset_email_is_configured()
     {
-        return trim((string) env('RESEND_API_KEY', '')) !== ''
-            && trim((string) env('RESEND_FROM_EMAIL', '')) !== ''
+        return trim((string) env('BREVO_API_KEY', '')) !== ''
+            && trim((string) env('BREVO_FROM_EMAIL', '')) !== ''
             && trim((string) env('FRONTEND_URL', '')) !== ''
             && function_exists('curl_init');
     }
