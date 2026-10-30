@@ -80,3 +80,10 @@ $router->post('/api/calendar/disconnect', 'CalendarSync::disconnect')->middlewar
 $router->post('/api/calendar/sync-enabled', 'CalendarSync::toggle')->middleware('auth');
 $router->get('/calendar/callback', 'CalendarSync::callback');
 $router->post('/api/calendar/sync', 'CalendarEvents::sync')->middleware('auth');
+
+// Runner problem reports and admin-only support operations.
+$router->get('/api/support/reports', 'Support::reports')->middleware('auth');
+$router->post('/api/support/reports', 'Support::create_report')->middleware('auth');
+$router->patch('/api/support/reports/{id}', 'Support::update_report')->middleware('auth');
+$router->get('/api/support/console', 'Support::console')->middleware('auth');
+$router->get('/api/support/system', 'Support::system')->middleware('auth');
