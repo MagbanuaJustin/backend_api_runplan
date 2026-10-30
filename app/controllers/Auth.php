@@ -10,6 +10,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
  */
 class Auth extends Controller
 {
+    private const TERMS_VERSION = '2026-10-30';
+
     public function register()
     {
         $this->call->library('api');
@@ -21,6 +23,7 @@ class Auth extends Controller
         $this->api->rate_limit('register_' . ($_SERVER['REMOTE_ADDR'] ?? 'x'), 5, 600);
 
         $input = $this->read_json();
+        $terms_version = $this->verify_terms_acceptance($input);
         $this->verify_recaptcha($input);
 
         $email    = UserModel::normalise_email($input['email'] ?? '');
@@ -45,7 +48,10 @@ class Auth extends Controller
         $this->SecurityEventModel->record(
             'account_registered',
             (int) $user['id'],
-            ['method' => 'password']
+            [
+                'method'        => 'password',
+                'terms_version' => $terms_version,
+            ]
         );
 
         $this->api->respond([
@@ -218,6 +224,7 @@ class Auth extends Controller
             || ($hosted_domain !== '' && $hosted_domain === $email_domain);
 
         $created = false;
+        $terms_version = null;
         $identity = $this->UserModel->find_identity('google', $subject);
 
         if ($identity) {
@@ -249,8 +256,9 @@ class Auth extends Controller
                     );
                 }
             } else {
-                // Google sign-in can proceed without a CAPTCHA for an existing
-                // account. Require verification only before creating a new one.
+                // Require the agreement and CAPTCHA only when creating a new
+                // Google account. Signing into an existing account needs neither.
+                $terms_version = $this->verify_terms_acceptance($input);
                 $this->verify_recaptcha($input);
 
                 $user = $this->UserModel->create_google_account($email, $subject);
@@ -302,7 +310,10 @@ class Auth extends Controller
             $this->SecurityEventModel->record(
                 'account_registered',
                 (int) $user['id'],
-                ['method' => 'google']
+                [
+                    'method'        => 'google',
+                    'terms_version' => $terms_version,
+                ]
             );
         }
 
@@ -539,6 +550,28 @@ class Auth extends Controller
         }
 
         return $input;
+    }
+
+    /**
+     * Require explicit acceptance of the current Terms and Privacy Notice.
+     * The accepted version is recorded in the account_registered security event.
+     */
+    private function verify_terms_acceptance(array $input)
+    {
+        $accepted = filter_var(
+            $input['terms_accepted'] ?? false,
+            FILTER_VALIDATE_BOOLEAN
+        );
+        $version = trim((string) ($input['terms_version'] ?? ''));
+
+        if (!$accepted || $version !== self::TERMS_VERSION) {
+            $this->api->respond_error(
+                'Please accept the current Terms of Use and Privacy Notice to create an account.',
+                422
+            );
+        }
+
+        return $version;
     }
 
     /**
