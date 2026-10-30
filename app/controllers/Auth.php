@@ -69,7 +69,6 @@ class Auth extends Controller
         $this->api->rate_limit('login_' . $ip, 10, 600);
 
         $input = $this->read_json();
-        $this->verify_recaptcha($input);
 
         $email    = UserModel::normalise_email($input['email'] ?? '');
         $password = (string) ($input['password'] ?? '');
@@ -125,7 +124,6 @@ class Auth extends Controller
         $this->api->rate_limit('google_login_' . $ip, 10, 600);
 
         $input = $this->read_json();
-        $this->verify_recaptcha($input);
 
         $credential = trim((string) ($input['credential'] ?? ''));
 
@@ -251,6 +249,10 @@ class Auth extends Controller
                     );
                 }
             } else {
+                // Google sign-in can proceed without a CAPTCHA for an existing
+                // account. Require verification only before creating a new one.
+                $this->verify_recaptcha($input);
+
                 $user = $this->UserModel->create_google_account($email, $subject);
 
                 if ($user) {
@@ -326,7 +328,6 @@ class Auth extends Controller
         $this->api->rate_limit('forgot_' . $ip, 8, 600);
 
         $input = $this->read_json();
-        $this->verify_recaptcha($input);
 
         $email = UserModel::normalise_email($input['email'] ?? '');
 
@@ -404,7 +405,6 @@ class Auth extends Controller
         $this->api->rate_limit('reset_' . ($_SERVER['REMOTE_ADDR'] ?? 'x'), 10, 600);
 
         $input = $this->read_json();
-        $this->verify_recaptcha($input);
 
         $token    = trim((string) ($input['token'] ?? ''));
         $password = (string) ($input['password'] ?? '');
@@ -595,7 +595,7 @@ class Auth extends Controller
                 . '<p>If you did not request this, you can ignore this email.</p>'
                 . '<p>If the button does not work, copy this address into your browser:<br>'
                 . $safe_reset_url . '</p></body></html>',
-            'textContent' => "We received a request to reset your RunPlan password.\n\n"
+            'textContent' => "We received a request to reset the password for your RunPlan account.\n\n"
                 . "Choose a new password using this one-time link (expires in "
                 . (int) PasswordResetModel::TTL_MINUTES . " minutes):\n"
                 . $reset_url . "\n\nIf you did not request this, ignore this email.",
@@ -672,8 +672,8 @@ class Auth extends Controller
 
     /**
      * Verify a Google Cloud Fraud Defense checkbox response token by
-     * creating a server-side assessment. The API key is restricted to the
-     * reCAPTCHA Enterprise API and is never sent to the browser.
+     * creating a server-side assessment. The API key is read only from the
+     * server environment and is never sent to the browser.
      */
     private function verify_recaptcha(array $input)
     {

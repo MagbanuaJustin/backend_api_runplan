@@ -91,3 +91,4 @@ $router->patch('/api/support/users/{id}/password', 'Support::update_runner_passw
 $router->get('/api/support/backups', 'Support::backups')->middleware('auth');
 $router->post('/api/support/backups', 'Support::create_backup')->middleware('auth');
 $router->get('/api/support/backups/{id}', 'Support::download_backup')->middleware('auth');
+$router->get('/api/downloads/android', 'Downloads::android')->middleware('auth');
