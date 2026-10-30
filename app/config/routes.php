@@ -46,6 +46,7 @@ $router->get('/api/profile', 'Profile::show')->middleware('auth');
 $router->put('/api/profile', 'Profile::save')->middleware('auth');
 
 $router->post('/api/plans/generate', 'Plans::generate')->middleware('auth');
+$router->post('/api/plans/manual', 'Plans::manual')->middleware('auth');
 $router->get('/api/plans/current', 'Plans::current')->middleware('auth');
 $router->post('/api/plans/{id}/approve', 'Plans::approve')->middleware('auth');
 $router->delete('/api/plans/{id}', 'Plans::discard')->middleware('auth');

@@ -242,9 +242,10 @@ class PlanModel extends Model {
     // ------------------------------------------------------------------
     // Database
     // ------------------------------------------------------------------
-    public function create_draft($user_id, array $plan, array $sessions)
+    public function create_draft($user_id, array $plan, array $sessions, $creation_mode = 'generated')
     {
         $user_id = (int) $user_id;
+        $creation_mode = $creation_mode === 'manual' ? 'manual' : 'generated';
         $this->db->transaction();
 
         $this->db->raw("DELETE FROM training_plans WHERE user_id = ? AND status = 'draft'", [$user_id]);
@@ -252,6 +253,7 @@ class PlanModel extends Model {
         $this->db->table($this->table)->insert([
             'user_id'           => $user_id,
             'goal'              => $plan['goal'],
+            'creation_mode'     => $creation_mode,
             'start_date'        => $plan['start_date'],
             'end_date'          => $plan['end_date'],
             'sessions_per_week' => $plan['sessions_per_week'],
@@ -906,6 +908,7 @@ class PlanModel extends Model {
             'plan' => [
                 'id'                => (int) $r['id'],
                 'goal'              => $r['goal'],
+                'creation_mode'     => $r['creation_mode'] ?? 'generated',
                 'start_date'        => $r['start_date'],
                 'end_date'          => $r['end_date'],
                 'sessions_per_week' => (int) $r['sessions_per_week'],
