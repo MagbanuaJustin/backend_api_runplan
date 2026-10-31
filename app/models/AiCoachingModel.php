@@ -1,7 +1,7 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
-require_once dirname(__DIR__) . '/libraries/GeminiService.php';
+require_once dirname(__DIR__) . '/libraries/GroqService.php';
 
 /**
  * Model: AiCoachingModel
@@ -9,8 +9,8 @@ require_once dirname(__DIR__) . '/libraries/GeminiService.php';
  * Persists AI / rule-based weekly coaching feedback (`ai_feedback`) and plan
  * generation audit rows (`ai_plan_requests`), enforcing:
  *   1. Strict `source = 'manual'` first-party data boundary (never non-manual runs).
- *   2. Monthly outbound Gemini call ceiling (`GEMINI_MONTHLY_CALL_CAP`).
- *   3. Automatic deterministic coaching fallback when Gemini is disabled,
+ *   2. Monthly outbound Groq call ceiling (`GROQ_MONTHLY_CALL_CAP`).
+ *   3. Automatic deterministic coaching fallback when Groq is disabled,
  *      over cap, or unreachable (Spec 5.1 & 7.3 / NFR-04).
  */
 class AiCoachingModel extends Model {
@@ -18,108 +18,23 @@ class AiCoachingModel extends Model {
     protected $table       = 'ai_feedback';
     protected $primary_key = 'id';
 
-    /** @var bool|null true = tables verified, false = schema unusable */
-    private static $schema_ok = null;
-
-    /**
-     * Verifies (and, on a fresh or restored database, creates) the two AI
-     * audit tables before they are queried.
-     *
-     * Why this exists: the dashboard's coaching card is the only screen that
-     * touches `ai_feedback` / `ai_plan_requests`. On a deployment where
-     * migration 008 was never applied, that card used to take the whole card
-     * down with an opaque server error. Checking once per request is cheap and
-     * keeps the core dashboard working with no AI tables at all (NFR-04).
-     */
-    private function ensure_tables()
-    {
-        if (self::$schema_ok === true) {
-            return;
-        }
-
-        try {
-            $this->db->raw('SELECT 1 FROM ai_feedback LIMIT 1')->fetch(PDO::FETCH_ASSOC);
-            $this->db->raw('SELECT 1 FROM ai_plan_requests LIMIT 1')->fetch(PDO::FETCH_ASSOC);
-            self::$schema_ok = true;
-            return;
-        } catch (Throwable $e) {
-            self::$schema_ok = false;
-        }
-
-        // Mirrors migration 008. Every statement is CREATE TABLE IF NOT EXISTS,
-        // so re-running it on a healthy database is a no-op.
-        try {
-            $this->db->raw(
-                'CREATE TABLE IF NOT EXISTS ai_plan_requests (
-                    id INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-                    user_id INT(11) UNSIGNED NOT NULL,
-                    plan_id INT(11) UNSIGNED NULL DEFAULT NULL,
-                    provider VARCHAR(30) NOT NULL,
-                    status ENUM(\'pending\',\'succeeded\',\'failed\',\'fallback\') NOT NULL DEFAULT \'pending\',
-                    request_summary VARCHAR(500) NULL DEFAULT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (id),
-                    KEY user_created_idx (user_id, created_at),
-                    KEY plan_id_idx (plan_id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
-            );
-            $this->db->raw(
-                'CREATE TABLE IF NOT EXISTS ai_feedback (
-                    id INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-                    user_id INT(11) UNSIGNED NOT NULL,
-                    period_start DATE NOT NULL,
-                    period_end DATE NOT NULL,
-                    metrics_snapshot JSON NOT NULL,
-                    feedback_text TEXT NULL,
-                    provider_status VARCHAR(30) NOT NULL DEFAULT \'ok\',
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (id),
-                    UNIQUE KEY user_period_unique (user_id, period_start)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
-            );
-
-            $this->db->raw('SELECT 1 FROM ai_feedback LIMIT 1')->fetch(PDO::FETCH_ASSOC);
-            self::$schema_ok = true;
-        } catch (Throwable $e) {
-            // Non-MySQL driver or no CREATE privilege: callers degrade to an
-            // unsaved, in-memory coaching review instead of failing the page.
-            self::$schema_ok = false;
-        }
-    }
-
     public function latest_feedback_for_user($user_id)
     {
-        $this->ensure_tables();
+        $row = $this->db->table('ai_feedback')
+            ->select('id, period_start, period_end, metrics_snapshot, feedback_text, provider_status, created_at')
+            ->where('user_id', (int) $user_id)
+            ->order_by('period_start', 'DESC')
+            ->limit(1)
+            ->get();
 
-        try {
-            $row = $this->db->raw(
-                'SELECT id, period_start, period_end, metrics_snapshot,
-                        feedback_text, provider_status, created_at
-                   FROM ai_feedback
-                  WHERE user_id = ?
-                  ORDER BY period_start DESC, id DESC
-                  LIMIT 1',
-                array((int) $user_id)
-            )->fetch(PDO::FETCH_ASSOC);
-        } catch (Throwable $e) {
-            return null;
-        }
-
-        return $row ? $this->present_feedback($row) : null;
+        return is_array($row) ? $this->present_feedback($row) : null;
     }
-
-    /**
-     * Generates (or refreshes) the runner's 7-day coaching review, calling
-     * Google Gemini when ready + under monthly cap, or falling back to
-     * deterministic rule-based coaching otherwise.
-     */
-    public function generate_weekly_feedback($user_id, ?DateTimeImmutable $today = null, ?GeminiService $service = null)
+    public function generate_weekly_feedback($user_id, ?DateTimeImmutable $today = null, ?GroqService $service = null)
     {
-        $this->ensure_tables();
 
         $uid     = (int) $user_id;
         $ref     = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
-        $client  = $service ?: new GeminiService();
+        $client  = $service ?: new GroqService();
         $metrics = $this->build_weekly_metrics($uid, $ref);
 
         if (!$client->is_ready()) {
@@ -151,9 +66,8 @@ class AiCoachingModel extends Model {
      * Answers an unsaved chat question using only a short window of this
      * runner's first-party training metrics. Message contents are not logged.
      */
-    public function answer_chat_question($user_id, $question, ?DateTimeImmutable $today = null, ?GeminiService $service = null)
+    public function answer_chat_question($user_id, $question, ?DateTimeImmutable $today = null, ?GroqService $service = null)
     {
-        $this->ensure_tables();
 
         $uid = (int) $user_id;
         $question = trim((string) $question);
@@ -162,12 +76,12 @@ class AiCoachingModel extends Model {
         }
 
         $ref = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
-        $client = $service ?: new GeminiService();
+        $client = $service ?: new GroqService();
         if (!$client->is_ready()) {
-            return array('ok' => false, 'text' => null, 'provider_status' => 'not_configured', 'error' => 'Google Gemini is disabled or not configured.');
+            return array('ok' => false, 'text' => null, 'provider_status' => 'not_configured', 'error' => 'Groq is disabled or not configured.');
         }
         if ($this->monthly_calls_used($ref) >= $client->monthly_cap()) {
-            return array('ok' => false, 'text' => null, 'provider_status' => 'cap_reached', 'error' => 'The monthly Gemini call limit has been reached.');
+            return array('ok' => false, 'text' => null, 'provider_status' => 'cap_reached', 'error' => 'The monthly Groq call limit has been reached.');
         }
 
         $metrics = $this->build_weekly_metrics($uid, $ref);
@@ -179,7 +93,7 @@ class AiCoachingModel extends Model {
                 $this->db->table('ai_plan_requests')->insert(array(
                     'user_id' => $uid,
                     'plan_id' => null,
-                    'provider' => 'gemini',
+                    'provider' => 'groq',
                     'status' => !empty($result['ok']) ? 'succeeded' : 'failed',
                     'request_summary' => 'kind=chat chars=' . (int) mb_strlen($question),
                     'created_at' => gmdate('Y-m-d H:i:s'),
@@ -241,12 +155,12 @@ class AiCoachingModel extends Model {
      * a concise coaching brief (`['text' => string, 'provider_status' => string]`).
      * Distances and dates remain 100% governed by `PlanModel::build()`.
      */
-    public function record_plan_generation($user_id, $plan_id, array $profile, array $built, ?DateTimeImmutable $today = null, ?GeminiService $service = null)
+    public function record_plan_generation($user_id, $plan_id, array $profile, array $built, ?DateTimeImmutable $today = null, ?GroqService $service = null)
     {
         $uid    = (int) $user_id;
         $pid    = $plan_id !== null ? (int) $plan_id : null;
         $ref    = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
-        $client = $service ?: new GeminiService();
+        $client = $service ?: new GroqService();
 
         $sessions = $built['sessions'] ?? array();
         $total_km = 0.0;
@@ -298,13 +212,11 @@ class AiCoachingModel extends Model {
             }
         }
 
-        $this->ensure_tables();
-
         try {
             $this->db->table('ai_plan_requests')->insert(array(
                 'user_id'         => $uid,
                 'plan_id'         => $pid,
-                'provider'        => 'gemini',
+                'provider'        => 'groq',
                 'status'          => $req_status,
                 'request_summary' => mb_substr($summary_line, 0, 500),
                 'created_at'      => gmdate('Y-m-d H:i:s'),
@@ -331,129 +243,155 @@ class AiCoachingModel extends Model {
         $start = $ref->modify('-6 days')->format('Y-m-d');
         $end   = $ref->format('Y-m-d');
 
-        $profile = $this->db->raw(
-            'SELECT goal, experience FROM runner_profiles WHERE user_id = ? LIMIT 1',
-            array($uid)
-        )->fetch(PDO::FETCH_ASSOC);
+        $profile = $this->db->table('runner_profiles')
+            ->select('goal, experience')
+            ->where('user_id', $uid)
+            ->limit(1)
+            ->get();
 
-        $runs = $this->db->raw(
-            "SELECT COUNT(*) AS runs_logged,
-                    COALESCE(SUM(distance_km), 0) AS distance_km,
-                    COALESCE(SUM(duration_seconds), 0) AS duration_seconds,
-                    AVG(effort) AS avg_effort,
-                    COALESCE(MAX(distance_km), 0) AS longest_run_km
-               FROM activities
-              WHERE user_id = ?
-                AND source = 'manual'
-                AND activity_date BETWEEN ? AND ?",
-            array($uid, $start, $end)
-        )->fetch(PDO::FETCH_ASSOC);
+        $runs = $this->db->table('activities')
+            ->select('distance_km, duration_seconds, effort')
+            ->where(array('user_id' => $uid, 'source' => 'manual'))
+            ->between('activity_date', $start, $end)
+            ->get_all();
 
-        $sess = $this->db->raw(
-            "SELECT COALESCE(SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed_cnt,
-                    COALESCE(SUM(CASE WHEN s.status = 'planned'   THEN 1 ELSE 0 END), 0) AS planned_cnt,
-                    COALESCE(SUM(CASE WHEN s.status = 'skipped'   THEN 1 ELSE 0 END), 0) AS skipped_cnt,
-                    COALESCE(SUM(CASE WHEN s.status = 'missed'    THEN 1 ELSE 0 END), 0) AS missed_cnt
-               FROM training_sessions s
-               JOIN training_plans p ON p.id = s.plan_id
-              WHERE s.user_id = ?
-                AND p.status = 'active'
-                AND s.scheduled_date BETWEEN ? AND ?",
-            array($uid, $start, $end)
-        )->fetch(PDO::FETCH_ASSOC);
+        $runs_logged = count($runs);
+        $distance_km = 0.0;
+        $duration_seconds = 0;
+        $longest_run_km = 0.0;
+        $effort_total = 0.0;
+        $effort_count = 0;
+
+        foreach ($runs as $run) {
+            $distance = (float) ($run['distance_km'] ?? 0);
+            $distance_km += $distance;
+            $duration_seconds += (int) ($run['duration_seconds'] ?? 0);
+            $longest_run_km = max($longest_run_km, $distance);
+
+            if (isset($run['effort']) && $run['effort'] !== '' && is_numeric($run['effort'])) {
+                $effort_total += (float) $run['effort'];
+                $effort_count++;
+            }
+        }
+
+        $completed = 0;
+        $planned = 0;
+        $skipped = 0;
+        $missed = 0;
+
+        $active_plans = $this->db->table('training_plans')
+            ->select('id')
+            ->where(array('user_id' => $uid, 'status' => 'active'))
+            ->get_all();
+
+        foreach ($active_plans as $plan) {
+            $sessions = $this->db->table('training_sessions')
+                ->select('status')
+                ->where(array('user_id' => $uid, 'plan_id' => (int) $plan['id']))
+                ->between('scheduled_date', $start, $end)
+                ->get_all();
+
+            foreach ($sessions as $session) {
+                switch ($session['status'] ?? '') {
+                    case 'completed':
+                        $completed++;
+                        break;
+                    case 'planned':
+                        $planned++;
+                        break;
+                    case 'skipped':
+                        $skipped++;
+                        break;
+                    case 'missed':
+                        $missed++;
+                        break;
+                }
+            }
+        }
 
         return array(
             'period_start'       => $start,
             'period_end'         => $end,
             'goal'               => $profile['goal'] ?? 'general_fitness',
             'experience'         => $profile['experience'] ?? 'beginner',
-            'runs_logged'        => (int) ($runs['runs_logged'] ?? 0),
-            'distance_km'        => round((float) ($runs['distance_km'] ?? 0), 2),
-            'duration_seconds'   => (int) ($runs['duration_seconds'] ?? 0),
-            'avg_effort'         => isset($runs['avg_effort']) && $runs['avg_effort'] !== null
-                ? round((float) $runs['avg_effort'], 1)
-                : null,
-            'longest_run_km'     => round((float) ($runs['longest_run_km'] ?? 0), 2),
-            'sessions_completed' => (int) ($sess['completed_cnt'] ?? 0),
-            'sessions_planned'   => (int) ($sess['planned_cnt'] ?? 0),
-            'sessions_skipped'   => (int) ($sess['skipped_cnt'] ?? 0),
-            'sessions_missed'    => (int) ($sess['missed_cnt'] ?? 0),
+            'runs_logged'        => $runs_logged,
+            'distance_km'        => round($distance_km, 2),
+            'duration_seconds'   => $duration_seconds,
+            'avg_effort'         => $effort_count > 0 ? round($effort_total / $effort_count, 1) : null,
+            'longest_run_km'     => round($longest_run_km, 2),
+            'sessions_completed' => $completed,
+            'sessions_planned'   => $planned,
+            'sessions_skipped'   => $skipped,
+            'sessions_missed'    => $missed,
         );
     }
-
     public function monthly_calls_used(?DateTimeImmutable $today = null)
     {
-        $ref         = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
+        $ref = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
         $month_start = $ref->format('Y-m-01') . ' 00:00:00';
 
-        try {
-            $plan_calls = (int) $this->db->raw(
-                "SELECT COUNT(*) FROM ai_plan_requests
-                  WHERE provider = 'gemini'
-                    AND status IN ('succeeded', 'failed')
-                    AND created_at >= ?",
-                array($month_start)
-            )->fetchColumn();
+        $successful_plan_calls = $this->db->table('ai_plan_requests')
+            ->where(array('provider' => 'groq', 'status' => 'succeeded'))
+            ->where('created_at', '>=', $month_start)
+            ->count();
 
-            $feedback_calls = (int) $this->db->raw(
-                "SELECT COUNT(*) FROM ai_feedback
-                  WHERE provider_status = 'ok'
-                    AND created_at >= ?",
-                array($month_start)
-            )->fetchColumn();
-        } catch (Throwable $e) {
-            // No readable audit tables means no recorded calls, not a failure.
-            return 0;
-        }
+        $failed_plan_calls = $this->db->table('ai_plan_requests')
+            ->where(array('provider' => 'groq', 'status' => 'failed'))
+            ->where('created_at', '>=', $month_start)
+            ->count();
 
-        return $plan_calls + $feedback_calls;
+        $feedback_calls = $this->db->table('ai_feedback')
+            ->where('provider_status', 'ok')
+            ->where('created_at', '>=', $month_start)
+            ->count();
+
+        return (int) $successful_plan_calls + (int) $failed_plan_calls + (int) $feedback_calls;
     }
-
     private function save_feedback($user_id, $period_start, $period_end, array $metrics, $text, $provider_status)
     {
         $now_utc = gmdate('Y-m-d H:i:s');
-        $json    = json_encode($metrics, JSON_UNESCAPED_SLASHES);
+        $json = json_encode($metrics, JSON_UNESCAPED_SLASHES);
+        $uid = (int) $user_id;
 
-        $existing = $this->db->raw(
-            'SELECT id FROM ai_feedback WHERE user_id = ? AND period_start = ? LIMIT 1',
-            array((int) $user_id, $period_start)
-        )->fetch(PDO::FETCH_ASSOC);
+        $existing = $this->db->table('ai_feedback')
+            ->select('id')
+            ->where(array('user_id' => $uid, 'period_start' => $period_start))
+            ->limit(1)
+            ->get();
 
-        if ($existing) {
+        $values = array(
+            'period_end' => $period_end,
+            'metrics_snapshot' => $json,
+            'feedback_text' => $text,
+            'provider_status' => $provider_status,
+            'created_at' => $now_utc,
+        );
+
+        if (is_array($existing)) {
             $id = (int) $existing['id'];
-            $this->db->raw(
-                'UPDATE ai_feedback
-                    SET period_end = ?,
-                        metrics_snapshot = ?,
-                        feedback_text = ?,
-                        provider_status = ?,
-                        created_at = ?
-                  WHERE id = ? AND user_id = ?',
-                array($period_end, $json, $text, $provider_status, $now_utc, $id, (int) $user_id)
-            );
+            $this->db->table('ai_feedback')
+                ->where(array('id' => $id, 'user_id' => $uid))
+                ->update($values);
         } else {
-            $this->db->table('ai_feedback')->insert(array(
-                'user_id'          => (int) $user_id,
-                'period_start'     => $period_start,
-                'period_end'       => $period_end,
-                'metrics_snapshot' => $json,
-                'feedback_text'    => $text,
-                'provider_status'  => $provider_status,
-                'created_at'       => $now_utc,
-            ));
+            $this->db->table('ai_feedback')->insert(array_merge($values, array(
+                'user_id' => $uid,
+                'period_start' => $period_start,
+            )));
             $id = (int) $this->db->last_id();
         }
 
-        $row = $this->db->raw(
-            'SELECT id, period_start, period_end, metrics_snapshot,
-                    feedback_text, provider_status, created_at
-               FROM ai_feedback WHERE id = ? LIMIT 1',
-            array($id)
-        )->fetch(PDO::FETCH_ASSOC);
+        $row = $this->db->table('ai_feedback')
+            ->select('id, period_start, period_end, metrics_snapshot, feedback_text, provider_status, created_at')
+            ->where(array('id' => $id, 'user_id' => $uid))
+            ->limit(1)
+            ->get();
+
+        if (!is_array($row)) {
+            throw new RuntimeException('Could not reload the saved coaching feedback.');
+        }
 
         return $this->present_feedback($row);
     }
-
     private function present_feedback(array $row)
     {
         $decoded = json_decode((string) ($row['metrics_snapshot'] ?? ''), true);

@@ -66,7 +66,7 @@ if (!function_exists('integration_credential_present')) {
         }
 
         $required = array(
-            'gemini'          => array('api_key'),
+            'groq'            => array('api_key'),
             'openweathermap'  => array('api_key'),
             'google_calendar' => array('client_id', 'client_secret', 'redirect_uri', 'token_aad'),
             'google_identity' => array('client_id'),
@@ -152,15 +152,15 @@ if (!function_exists('integration_public_config')) {
     function integration_public_config()
     {
         return array(
-            'gemini' => array(
-                'ready' => integration_ready('gemini'),
+            'groq' => array(
+                'ready' => integration_ready('groq'),
                 'enabled' => (bool) filter_var(
-                    integration_value('gemini', 'enabled', false),
+                    integration_value('groq', 'enabled', false),
                     FILTER_VALIDATE_BOOLEAN,
                     FILTER_NULL_ON_FAILURE
                 ),
-                'configured' => integration_credential_present('gemini'),
-                'model' => integration_value('gemini', 'model'),
+                'configured' => integration_credential_present('groq'),
+                'model' => integration_value('groq', 'model'),
             ),
             'weather' => array(
                 'ready' => integration_ready('openweathermap'),
