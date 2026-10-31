@@ -163,8 +163,11 @@ class GeminiService {
                 ),
             ),
             'generationConfig' => array(
-                'maxOutputTokens' => $max_tokens,
-            ),
+    'thinkingConfig' => array(
+        'thinkingLevel' => 'low',
+    ),
+    'maxOutputTokens' => $max_tokens,
+),
         );
         $request_options = array(
             'timeout' => $timeout,
