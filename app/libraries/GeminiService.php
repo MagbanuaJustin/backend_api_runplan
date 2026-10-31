@@ -29,7 +29,7 @@ class GeminiService {
         }
 
         // Keep provider calls short enough to return a useful error promptly.
-        $timeout = max(3, min(12, (int) ($this->config['timeout'] ?? 12)));
+        $timeout = max(3, min(30, (int) ($this->config['timeout'] ?? 25)));
         $this->http = $http ?: new HttpClient($timeout);
     }
 
