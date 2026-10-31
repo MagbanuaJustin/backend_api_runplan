@@ -21,19 +21,19 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
  * Failure contract: request() never throws and never returns a partial body.
  * It returns an array:
  *
- *   ok        bool   - transport succeeded AND status is 2xx
- *   status    int    - HTTP status, 0 when the request never completed
- *   data      ?array - decoded JSON object/array, null if not JSON
- *   raw       string - body text, truncated to max_bytes
- *   error     ?string  - safe, human-oriented message (never contains a key)
- *   error_code?string  - machine tag for branching: timeout|dns|tls|transport|http|json
+ *   ok         bool    - transport succeeded AND status is 2xx
+ *   status     int     - HTTP status, 0 when the request never completed
+ *   data       ?array  - decoded JSON object/array, null if not JSON
+ *   raw        string  - body text, truncated to max_bytes
+ *   error      ?string - safe, human-oriented message (never contains a key)
+ *   error_code ?string - machine tag for branching: timeout|dns|tls|transport|http|json
  */
 class HttpClient {
 
     /** @var array|null Queue of canned responses used by tests. Null = real network. */
     private static $fake_queue = null;
 
-    /** @var array Requests recorded while faking, for assertions in tests. */
+    /** @var array Requests recorded while faking, for assertions. */
     private static $recorded = array();
 
     /** @var int Refuse to read more than this much of a response body. */
@@ -92,14 +92,19 @@ class HttpClient {
 
         if (!function_exists('curl_init')) {
             return $this->normalise(array(
-                'ok' => false, 'status' => 0, 'error' => 'HTTP support is unavailable on this server.',
+                'ok' => false,
+                'status' => 0,
+                'error' => 'HTTP support is unavailable on this server.',
                 'error_code' => 'transport',
             ));
         }
 
         if (!$this->url_allowed($url)) {
             return $this->normalise(array(
-                'ok' => false, 'status' => 0, 'error' => 'Refusing to call that URL.', 'error_code' => 'transport',
+                'ok' => false,
+                'status' => 0,
+                'error' => 'Refusing to call that URL.',
+                'error_code' => 'transport',
             ));
         }
 
@@ -149,6 +154,25 @@ class HttpClient {
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $errno = curl_errno($ch);
         $errstr = (string) curl_error($ch);
+
+        // Capture connection phases before closing the cURL handle.
+        // These contain timings only; they never include request headers or secrets.
+        $dns_ms = (float) curl_getinfo($ch, CURLINFO_NAMELOOKUP_TIME) * 1000;
+        $connect_ms = (float) curl_getinfo($ch, CURLINFO_CONNECT_TIME) * 1000;
+        $appconnect_ms = (float) curl_getinfo($ch, CURLINFO_APPCONNECT_TIME) * 1000;
+        $first_byte_ms = (float) curl_getinfo($ch, CURLINFO_STARTTRANSFER_TIME) * 1000;
+        $total_ms = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME) * 1000;
+
+        $timing_debug = sprintf(
+            'curl_errno=%d dns_ms=%.1f connect_ms=%.1f tls_ms=%.1f first_byte_ms=%.1f total_ms=%.1f',
+            $errno,
+            $dns_ms,
+            $connect_ms,
+            max(0, $appconnect_ms - $connect_ms),
+            $first_byte_ms,
+            $total_ms
+        );
+
         if (PHP_VERSION_ID < 80000) {
             curl_close($ch);
         }
@@ -158,11 +182,15 @@ class HttpClient {
             $code = in_array($errno, array(CURLE_OPERATION_TIMEDOUT, CURLE_COULDNT_CONNECT), true) ? 'timeout'
                 : (in_array($errno, array(CURLE_COULDNT_RESOLVE_HOST, CURLE_COULDNT_RESOLVE_PROXY), true) ? 'dns'
                 : (($errno === CURLE_SSL_CACERT || $errno === CURLE_SSL_CONNECT_ERROR) ? 'tls' : 'transport'));
+
             return $this->normalise(array(
-                'ok' => false, 'status' => 0, 'error_code' => $code,
-                // The cURL text can name an internal host; keep it out of the response.
-                'error' => $code === 'timeout' ? 'The remote service took too long to answer.' : 'The remote service could not be reached.',
-                'debug' => $errstr,
+                'ok' => false,
+                'status' => 0,
+                'error_code' => $code,
+                'error' => $code === 'timeout'
+                    ? 'The remote service took too long to answer.'
+                    : 'The remote service could not be reached.',
+                'debug' => $errstr . ' | ' . $timing_debug,
             ));
         }
 
@@ -272,7 +300,7 @@ class HttpClient {
 
     /**
      * Turn anything a caller or the fake queue produced into the one shape
-     * controllers are allowed to rely on.
+     * that callers can rely on.
      *
      * @param array $r
      * @return array
