@@ -28,7 +28,8 @@ class GeminiService {
             $this->config = array();
         }
 
-        $timeout = max(3, min(60, (int) ($this->config['timeout'] ?? 25)));
+        // Keep provider calls short enough to return a useful error promptly.
+        $timeout = max(3, min(12, (int) ($this->config['timeout'] ?? 12)));
         $this->http = $http ?: new HttpClient($timeout);
     }
 
@@ -145,7 +146,7 @@ class GeminiService {
         $api_key = trim((string) ($this->config['api_key'] ?? ''));
         $model = $this->model_name();
         $max_tokens = min((int) $max_tokens_cap, max(128, (int) ($this->config['max_tokens'] ?? 3000)));
-        $timeout = max(3, min(60, (int) ($this->config['timeout'] ?? 25)));
+        $timeout = max(3, min(12, (int) ($this->config['timeout'] ?? 12)));
 
         if (preg_match('/^[A-Za-z0-9._-]+$/', $model) !== 1) {
             return $this->failure('configuration', 'The configured Gemini model name is invalid.');
@@ -162,7 +163,6 @@ class GeminiService {
                 ),
             ),
             'generationConfig' => array(
-                'temperature' => 0.4,
                 'maxOutputTokens' => $max_tokens,
             ),
         );
@@ -171,26 +171,17 @@ class GeminiService {
             'headers' => array('x-goog-api-key: ' . $api_key),
         );
 
-        // Gemini can briefly return 503 UNAVAILABLE during service overload.
-        // Retry at most twice with exponential backoff and jitter.
-        $attempt = 0;
-        do {
-            $response = $this->http->post_json(
-                $base_uri . '/' . rawurlencode($model) . ':generateContent',
-                $request_payload,
-                $request_options
-            );
-            $attempt++;
+        $url = $base_uri . '/' . rawurlencode($model) . ':generateContent';
+        $response = $this->http->post_json($url, $request_payload, $request_options);
+        $attempt = 1;
 
-            if (!empty($response['ok'])
-                || (int) ($response['status'] ?? 0) !== 503
-                || $attempt >= 3) {
-                break;
-            }
-
-            $backoff_us = 500000 * (2 ** ($attempt - 1));
-            usleep($backoff_us + mt_rand(0, 250000));
-        } while (true);
+        // Retry once only for a temporary Gemini overload response.
+        // Network timeouts and other errors return promptly without another wait.
+        if (empty($response['ok']) && (int) ($response['status'] ?? 0) === 503) {
+            usleep(350000 + mt_rand(0, 150000));
+            $response = $this->http->post_json($url, $request_payload, $request_options);
+            $attempt = 2;
+        }
 
         if (!$response['ok'] || !is_array($response['data'])) {
             $this->log_provider_failure($response, $attempt);
@@ -259,12 +250,12 @@ class GeminiService {
         }
 
         $diagnostic = array(
-            'http_status'     => (int) ($response['status'] ?? 0),
-            'attempts'        => (int) $attempts,
-            'transport_code'  => $response['error_code'] ?? null,
-            'transport_detail'=> substr($transport_detail, 0, 300),
-            'provider_code'   => isset($provider_error['code']) ? (int) $provider_error['code'] : null,
-            'provider_status' => isset($provider_error['status'])
+            'http_status'      => (int) ($response['status'] ?? 0),
+            'attempts'         => (int) $attempts,
+            'transport_code'   => $response['error_code'] ?? null,
+            'transport_detail' => substr($transport_detail, 0, 300),
+            'provider_code'    => isset($provider_error['code']) ? (int) $provider_error['code'] : null,
+            'provider_status'  => isset($provider_error['status'])
                 ? preg_replace('/[^A-Z0-9_]/i', '', (string) $provider_error['status'])
                 : null,
         );
