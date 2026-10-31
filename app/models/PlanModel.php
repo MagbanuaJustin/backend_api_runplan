@@ -107,11 +107,8 @@ class PlanModel extends Model {
             }
         }
 
-        $pref_time  = $p['preferred_time'] ?? null;
-        $start_time = ($pref_time !== null && isset(self::TIME_SLOTS[$pref_time]))
-            ? self::TIME_SLOTS[$pref_time]
-            : null;
-
+        $pref_time  = $p['preferred_time'] ?? 'morning';
+        $start_time = self::TIME_SLOTS[$pref_time] ?? self::TIME_SLOTS['morning'];
         // ---- distances and pace ----
         $peak_target = self::PEAK_LONG[$goal];
         $base_km     = $p['baseline_distance_km'] ?? null;
@@ -185,10 +182,16 @@ class PlanModel extends Model {
             }
 
             if ($race && $date == $race) {
-                $sessions[] = $this->make_session($date, '07:00:00', 'race', self::RACE_KM[$goal],
-                    $easy_pace * self::RACE_PACE[$goal]);
+                $sessions[] = $this->make_session(
+                    $date,
+                    $start_time,
+                    'race',
+                    self::RACE_KM[$goal],
+                    $easy_pace * self::RACE_PACE[$goal]
+                );
                 continue;
             }
+
             if ($race_eve && $date == $race_eve) {
                 continue; // rest the day before the race
             }
@@ -207,8 +210,13 @@ class PlanModel extends Model {
                 $sessions[] = $this->make_session($date, $start_time, 'long', $long, $easy_pace * 1.03);
             } elseif ($dow === $quality_dow && $info['kind'] === 'build' && $w >= 3) {
                 $type = ($exp === 'advanced' && $w % 2 === 0) ? 'interval' : 'tempo';
-                $sessions[] = $this->make_session($date, $start_time, $type, max(3.0, round($easy * 0.9, 1)),
-                    $easy_pace * ($type === 'tempo' ? 0.88 : 0.82));
+                $sessions[] = $this->make_session(
+                    $date,
+                    $start_time,
+                    $type,
+                    max(3.0, round($easy * 0.9, 1)),
+                    $easy_pace * ($type === 'tempo' ? 0.88 : 0.82)
+                );
             } else {
                 $km = $final ? 3.0 : $easy;
                 $sessions[] = $this->make_session($date, $start_time, 'easy', $km, $easy_pace);
