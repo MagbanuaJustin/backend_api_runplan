@@ -146,7 +146,7 @@ class GeminiService {
         $api_key = trim((string) ($this->config['api_key'] ?? ''));
         $model = $this->model_name();
         $max_tokens = min((int) $max_tokens_cap, max(128, (int) ($this->config['max_tokens'] ?? 3000)));
-        $timeout = max(3, min(12, (int) ($this->config['timeout'] ?? 12)));
+        $timeout = max(3, min(30, (int) ($this->config['timeout'] ?? 25)));
 
         if (preg_match('/^[A-Za-z0-9._-]+$/', $model) !== 1) {
             return $this->failure('configuration', 'The configured Gemini model name is invalid.');
