@@ -256,8 +256,20 @@ class Auth extends Controller
                     );
                 }
             } else {
-                // Require the agreement and CAPTCHA only when creating a new
-                // Google account. Signing into an existing account needs neither.
+                // The app is sign-in only. New Google accounts must be created
+                // through website registration, which collects consent and CAPTCHA.
+                $terms_accepted = filter_var(
+                    $input['terms_accepted'] ?? false,
+                    FILTER_VALIDATE_BOOLEAN
+                );
+
+                if (!$terms_accepted) {
+                    $this->api->respond_error(
+                        'This Google account is not linked to a RunPlan account. Create an account on the RunPlan website first.',
+                        409
+                    );
+                }
+
                 $terms_version = $this->verify_terms_acceptance($input);
                 $this->verify_recaptcha($input);
 
