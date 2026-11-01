@@ -339,7 +339,12 @@ class Database {
                 $this->lastIDInserted = (int) $this->db->lastInsertId();
                 return $this->lastIDInserted;
             } else {
-                return $stmt->rowCount();
+                // Remember the affected-row count so row_count() works after
+                // update()/delete(), as the models expect. table() resets it
+                // to 0 at the start of every query, so without this it was
+                // always 0 and callers treated successful writes as no-ops.
+                $this->rowCount = $stmt->rowCount();
+                return $this->rowCount;
             }
         } catch (Exception $e) {
             throw new PDOException($e->getMessage() . 'Query: ' . $this->getSQL . '');
