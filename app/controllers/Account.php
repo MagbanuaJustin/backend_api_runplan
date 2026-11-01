@@ -3,9 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Controller: Account
- *
- * First-party account overview, authenticated password rotation, and permanent
- * account + training data deletion (Spec §3.1, §9.2, FR-01).
+ * 
+ * Automatically generated via CLI.
  */
 class Account extends Controller {
 

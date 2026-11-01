@@ -3,91 +3,173 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Model: PlanModel
- *
- * Deterministic marathon/road-race plan builder, two-step revision workflow
- * (`propose` -> `apply` / `reject`), session rescheduling, and revision history.
+ * 
+ * Automatically generated via CLI.
  */
-class PlanModel extends Model {
+class PlanModel extends Model
+{
     protected $table = 'training_plans';
     protected $primary_key = 'id';
 
-    const RACE_KM      = ['5k' => 5.0, '10k' => 10.0, 'half_marathon' => 21.1, 'marathon' => 42.2];
-    const MIN_WEEKS    = ['5k' => 4, '10k' => 6, 'half_marathon' => 8, 'marathon' => 12];
-    const MAX_WEEKS    = 30;
-    const PEAK_LONG    = ['5k' => 10.0, '10k' => 14.0, 'half_marathon' => 20.0, 'marathon' => 32.0, 'general_fitness' => 12.0];
-    const TAPER        = ['5k' => [0.6], '10k' => [0.6], 'half_marathon' => [0.7, 0.5],
-                          'marathon' => [0.75, 0.6, 0.45], 'general_fitness' => []];
-    const MAX_SESSIONS = ['beginner' => 4, 'intermediate' => 5, 'advanced' => 6];
-    const START_LONG   = ['beginner' => 4.0, 'intermediate' => 6.0, 'advanced' => 8.0];
-    const EASY_PACE    = ['beginner' => 480, 'intermediate' => 390, 'advanced' => 330]; // seconds per km
-    const MAX_EASY     = ['beginner' => 5.0, 'intermediate' => 7.0, 'advanced' => 10.0];
-    const RACE_PACE    = ['5k' => 0.92, '10k' => 0.95, 'half_marathon' => 1.0, 'marathon' => 1.05];
-    const DOW          = ['mon' => 1, 'tue' => 2, 'wed' => 3, 'thu' => 4, 'fri' => 5, 'sat' => 6, 'sun' => 7];
-    const TIME_SLOTS   = [
-        'morning'   => '06:30:00',
-        'afternoon' => '14:00:00',
-        'evening'   => '18:30:00',
+    const RACE_KM = [
+        '5k' => 5.0,
+        '10k' => 10.0,
+        'half_marathon' => 21.1,
+        'marathon' => 42.2,
     ];
-    const NOTES        = [
-        'easy'     => 'Easy, conversational pace.',
-        'long'     => 'Long run: steady and relaxed. Walk breaks are fine.',
-        'tempo'    => 'Warm up, then a comfortably hard effort for the main part.',
+
+    const MIN_WEEKS = [
+        '5k' => 4,
+        '10k' => 6,
+        'half_marathon' => 8,
+        'marathon' => 12,
+    ];
+
+    const MAX_WEEKS = 30;
+
+    const PEAK_LONG = [
+        '5k' => 10.0,
+        '10k' => 14.0,
+        'half_marathon' => 20.0,
+        'marathon' => 32.0,
+        'general_fitness' => 12.0,
+    ];
+
+    const TAPER = [
+        '5k' => [0.6],
+        '10k' => [0.6],
+        'half_marathon' => [0.7, 0.5],
+        'marathon' => [0.75, 0.6, 0.45],
+        'general_fitness' => [],
+    ];
+
+    const MAX_SESSIONS = [
+        'beginner' => 4,
+        'intermediate' => 5,
+        'advanced' => 6,
+    ];
+
+    const START_LONG = [
+        'beginner' => 4.0,
+        'intermediate' => 6.0,
+        'advanced' => 8.0,
+    ];
+
+    const EASY_PACE = [
+        'beginner' => 480,
+        'intermediate' => 390,
+        'advanced' => 330,
+    ]; // seconds per km
+
+    const MAX_EASY = [
+        'beginner' => 5.0,
+        'intermediate' => 7.0,
+        'advanced' => 10.0,
+    ];
+
+    const RACE_PACE = [
+        '5k' => 0.92,
+        '10k' => 0.95,
+        'half_marathon' => 1.0,
+        'marathon' => 1.05,
+    ];
+
+    const DOW = [
+        'mon' => 1,
+        'tue' => 2,
+        'wed' => 3,
+        'thu' => 4,
+        'fri' => 5,
+        'sat' => 6,
+        'sun' => 7,
+    ];
+
+    const TIME_SLOTS = [
+        'morning' => '06:30:00',
+        'afternoon' => '14:00:00',
+        'evening' => '18:30:00',
+    ];
+
+    const NOTES = [
+        'easy' => 'Easy, conversational pace.',
+        'long' => 'Long run: steady and relaxed. Walk breaks are fine.',
+        'tempo' => 'Warm up, then a comfortably hard effort for the main part.',
         'interval' => 'Short fast efforts with easy jogging in between.',
-        'race'     => 'Race day. Start easy and enjoy it.',
+        'race' => 'Race day. Start easy and enjoy it.',
     ];
 
     // ------------------------------------------------------------------
     // Generator. Returns [result, errors]
     // ------------------------------------------------------------------
+
     public function build(array $p, DateTimeImmutable $today, array $opts = [])
     {
-        $utc     = new DateTimeZone('UTC');
-        $goal    = $p['goal'];
-        $exp     = $p['experience'];
-        $start   = $today->modify('+1 day');
-        $race    = null;
+        $utc = new DateTimeZone('UTC');
+        $goal = $p['goal'];
+        $exp = $p['experience'];
+        $start = $today->modify('+1 day');
+        $race = null;
         $rebuild = !empty($opts['rebuild']);
         $warnings = [];
 
         if ($goal === 'general_fitness') {
             $weeks = 8;
-            $end   = $start->modify('+55 days');
+            $end = $start->modify('+55 days');
         } else {
-            $race  = new DateTimeImmutable($p['target_race_date'], $utc);
-            $days  = (int) $start->diff($race)->format('%r%a');
+            $race = new DateTimeImmutable($p['target_race_date'], $utc);
+            $days = (int) $start->diff($race)->format('%r%a');
             $weeks = (int) ceil(($days + 1) / 7);
 
             if ($rebuild) {
                 if ($weeks < 1) {
-                    return [null, ['target_race_date' =>
-                        'Your race date has already passed. Update it in your profile first.']];
+                    return [
+                        null,
+                        [
+                            'target_race_date' =>
+                                'Your race date has already passed. Update it in your profile first.',
+                        ],
+                    ];
                 }
             } else {
                 if ($weeks < self::MIN_WEEKS[$goal]) {
-                    return [null, ['target_race_date' =>
-                        'Your race is too close for this goal. A safe plan needs at least '
-                        . self::MIN_WEEKS[$goal] . ' weeks.']];
+                    return [
+                        null,
+                        [
+                            'target_race_date' =>
+                                'Your race is too close for this goal. A safe plan needs at least '
+                                . self::MIN_WEEKS[$goal] . ' weeks.',
+                        ],
+                    ];
                 }
+
                 if ($weeks > self::MAX_WEEKS) {
-                    return [null, ['target_race_date' =>
-                        'Your race is more than ' . self::MAX_WEEKS
-                        . ' weeks away. Come back closer to the date, or choose general fitness.']];
+                    return [
+                        null,
+                        [
+                            'target_race_date' =>
+                                'Your race is more than ' . self::MAX_WEEKS
+                                . ' weeks away. Come back closer to the date, or choose general fitness.',
+                        ],
+                    ];
                 }
             }
+
             $end = $race;
         }
 
-        // ---- training days, spread out, always including the last chosen day ----
+        // Training days, spread out, always including the last chosen day.
         $avail = array_values($p['available_days']);
         $count = count($avail);
-        $n     = min($count, self::MAX_SESSIONS[$exp]);
+        $n = min($count, self::MAX_SESSIONS[$exp]);
 
         if (!empty($p['desired_sessions_per_week'])) {
             $desired = max(2, min(6, (int) $p['desired_sessions_per_week']));
+
             if ($desired > self::MAX_SESSIONS[$exp]) {
                 $warnings[] = 'Weekly sessions capped at ' . self::MAX_SESSIONS[$exp]
                     . ' for ' . $exp . ' level safety.';
             }
+
             $n = min($n, $desired);
         }
 
@@ -96,22 +178,29 @@ class PlanModel extends Model {
             $idx = $n === 1 ? 0 : (int) round($i * ($count - 1) / ($n - 1));
             $chosen[] = $avail[$idx];
         }
-        $chosen_dow = array_values(array_unique(array_map(fn($d) => self::DOW[$d], $chosen)));
-        $long_dow   = end($chosen_dow);
+
+        $chosen_dow = array_values(array_unique(array_map(
+            fn($day) => self::DOW[$day],
+            $chosen
+        )));
+        $long_dow = end($chosen_dow);
 
         $quality_dow = null;
         if ($exp !== 'beginner' && count($chosen_dow) >= 3) {
             $cand = $chosen_dow[(int) floor((count($chosen_dow) - 1) / 2)];
+
             if ($cand !== $long_dow && abs($cand - $long_dow) > 1) {
                 $quality_dow = $cand;
             }
         }
 
-        $pref_time  = $p['preferred_time'] ?? 'morning';
+        $pref_time = $p['preferred_time'] ?? 'morning';
         $start_time = self::TIME_SLOTS[$pref_time] ?? self::TIME_SLOTS['morning'];
-        // ---- distances and pace ----
+
+        // Distances and pace.
         $peak_target = self::PEAK_LONG[$goal];
-        $base_km     = $p['baseline_distance_km'] ?? null;
+        $base_km = $p['baseline_distance_km'] ?? null;
+
         if ($rebuild && !empty($opts['start_long'])) {
             $L0 = round(max(3.0, min((float) $opts['start_long'], 0.9 * $peak_target)), 1);
         } else {
@@ -124,38 +213,57 @@ class PlanModel extends Model {
             : self::EASY_PACE[$exp];
         $easy_pace = (float) max(240, min(720, $easy_pace));
 
-        // ---- week-by-week long run ----
-        $taper_mult  = $race ? self::TAPER[$goal] : [];
+        // Week-by-week long run.
+        $taper_mult = $race ? self::TAPER[$goal] : [];
         $build_weeks = $weeks - count($taper_mult);
-        $week     = [];
-        $prev     = $L0;
+        $week = [];
+        $prev = $L0;
         $achieved = 0.0;
 
         $prog_total = 0;
         for ($w = 1; $w <= $build_weeks; $w++) {
-            if ($w % 4 !== 0) { $prog_total++; }
+            if ($w % 4 !== 0) {
+                $prog_total++;
+            }
         }
+
         $step = $prog_total > 1 ? ($peak_target - $L0) / ($prog_total - 1) : 0;
         $k = 0;
 
         for ($w = 1; $w <= $build_weeks; $w++) {
             if ($w % 4 === 0) {
-                $week[$w] = ['long' => max(3.0, round($prev * 0.75, 1)), 'kind' => 'cutback'];
+                $week[$w] = [
+                    'long' => max(3.0, round($prev * 0.75, 1)),
+                    'kind' => 'cutback',
+                ];
                 continue;
             }
+
             $k++;
             if ($k === 1) {
                 $long = $L0;
             } else {
                 $linear = $L0 + $step * ($k - 1);
-                $long = min($peak_target, round($prev * 1.10 + 0.4, 1), round($linear, 1));
+                $long = min(
+                    $peak_target,
+                    round($prev * 1.10 + 0.4, 1),
+                    round($linear, 1)
+                );
             }
+
             $prev = $long;
             $achieved = max($achieved, $long);
-            $week[$w] = ['long' => $long, 'kind' => 'build'];
+            $week[$w] = [
+                'long' => $long,
+                'kind' => 'build',
+            ];
         }
+
         foreach ($taper_mult as $i => $mult) {
-            $week[$build_weeks + $i + 1] = ['long' => max(3.0, round($achieved * $mult, 1)), 'kind' => 'taper'];
+            $week[$build_weeks + $i + 1] = [
+                'long' => max(3.0, round($achieved * $mult, 1)),
+                'kind' => 'taper',
+            ];
         }
 
         if ($rebuild) {
@@ -166,17 +274,19 @@ class PlanModel extends Model {
             $warnings[] = 'Your longest run peaks at ' . $achieved
                 . ' km because of the time available. A later start date would allow more.';
         }
+
         if (empty($p['baseline_distance_km'])) {
             $warnings[] = 'No recent run was entered, so pace and starting distance are estimated from your experience.';
         }
 
-        // ---- sessions ----
+        // Sessions.
         $sessions = [];
         $race_eve = $race ? $race->modify('-1 day') : null;
 
         for ($date = $start; $date <= $end; $date = $date->modify('+1 day')) {
-            $w    = intdiv((int) $start->diff($date)->days, 7) + 1;
+            $w = intdiv((int) $start->diff($date)->days, 7) + 1;
             $info = $week[$w] ?? null;
+
             if ($info === null) {
                 break;
             }
@@ -193,7 +303,7 @@ class PlanModel extends Model {
             }
 
             if ($race_eve && $date == $race_eve) {
-                continue; // rest the day before the race
+                continue;
             }
 
             $dow = (int) $date->format('N');
@@ -201,13 +311,19 @@ class PlanModel extends Model {
                 continue;
             }
 
-            $final  = ($race !== null && $w === $weeks);
-            $long   = $info['long'];
+            $final = ($race !== null && $w === $weeks);
+            $long = $info['long'];
             $factor = ($info['kind'] === 'taper') ? 0.3 : 0.4;
-            $easy   = max(3.0, min(self::MAX_EASY[$exp], round($long * $factor, 1)));
+            $easy = max(3.0, min(self::MAX_EASY[$exp], round($long * $factor, 1)));
 
             if ($dow === $long_dow && !$final) {
-                $sessions[] = $this->make_session($date, $start_time, 'long', $long, $easy_pace * 1.03);
+                $sessions[] = $this->make_session(
+                    $date,
+                    $start_time,
+                    'long',
+                    $long,
+                    $easy_pace * 1.03
+                );
             } elseif ($dow === $quality_dow && $info['kind'] === 'build' && $w >= 3) {
                 $type = ($exp === 'advanced' && $w % 2 === 0) ? 'interval' : 'tempo';
                 $sessions[] = $this->make_session(
@@ -219,91 +335,115 @@ class PlanModel extends Model {
                 );
             } else {
                 $km = $final ? 3.0 : $easy;
-                $sessions[] = $this->make_session($date, $start_time, 'easy', $km, $easy_pace);
+                $sessions[] = $this->make_session(
+                    $date,
+                    $start_time,
+                    'easy',
+                    $km,
+                    $easy_pace
+                );
             }
         }
 
-        return [[
-            'plan' => [
-                'goal'              => $goal,
-                'start_date'        => $start->format('Y-m-d'),
-                'end_date'          => $end->format('Y-m-d'),
-                'sessions_per_week' => count($chosen_dow),
+        return [
+            [
+                'plan' => [
+                    'goal' => $goal,
+                    'start_date' => $start->format('Y-m-d'),
+                    'end_date' => $end->format('Y-m-d'),
+                    'sessions_per_week' => count($chosen_dow),
+                ],
+                'sessions' => $sessions,
+                'warnings' => $warnings,
             ],
-            'sessions' => $sessions,
-            'warnings' => $warnings,
-        ], []];
+            [],
+        ];
     }
 
     private function make_session(DateTimeImmutable $date, $start_time, $type, $km, $pace)
     {
         return [
-            'scheduled_date'           => $date->format('Y-m-d'),
-            'planned_start_time'       => $start_time,
-            'type'                     => $type,
-            'planned_distance_km'      => round($km, 2),
+            'scheduled_date' => $date->format('Y-m-d'),
+            'planned_start_time' => $start_time,
+            'type' => $type,
+            'planned_distance_km' => round($km, 2),
             'planned_duration_seconds' => (int) round($km * $pace),
-            'notes'                    => self::NOTES[$type],
+            'notes' => self::NOTES[$type],
         ];
     }
 
     // ------------------------------------------------------------------
     // Database
     // ------------------------------------------------------------------
+
     public function create_draft($user_id, array $plan, array $sessions, $creation_mode = 'generated')
     {
         $user_id = (int) $user_id;
         $creation_mode = $creation_mode === 'manual' ? 'manual' : 'generated';
+
         $this->db->transaction();
 
-        $this->db->raw("DELETE FROM training_plans WHERE user_id = ? AND status = 'draft'", [$user_id]);
+        $this->db->table($this->table)
+            ->where('user_id', $user_id)
+            ->where('status', 'draft')
+            ->delete();
 
         $this->db->table($this->table)->insert([
-            'user_id'           => $user_id,
-            'goal'              => $plan['goal'],
-            'creation_mode'     => $creation_mode,
-            'start_date'        => $plan['start_date'],
-            'end_date'          => $plan['end_date'],
+            'user_id' => $user_id,
+            'goal' => $plan['goal'],
+            'creation_mode' => $creation_mode,
+            'start_date' => $plan['start_date'],
+            'end_date' => $plan['end_date'],
             'sessions_per_week' => $plan['sessions_per_week'],
-            'status'            => 'draft',
-            'version'           => 1,
+            'status' => 'draft',
+            'version' => 1,
         ]);
-        $plan_id = (int) $this->db->last_id();
 
+        $plan_id = (int) $this->db->last_id();
         $this->insert_sessions($plan_id, $user_id, $sessions);
 
         $this->db->commit();
+
         return $plan_id;
     }
 
     public function find_for_user($user_id, $plan_id)
     {
-        $row = $this->db->raw(
-            'SELECT * FROM training_plans WHERE id = ? AND user_id = ? LIMIT 1',
-            [(int) $plan_id, (int) $user_id]
-        )->fetch(PDO::FETCH_ASSOC);
+        $row = $this->db->table($this->table)
+            ->select('*')
+            ->where('id', (int) $plan_id)
+            ->where('user_id', (int) $user_id)
+            ->limit(1)
+            ->get();
 
         return $row ? $this->with_sessions($row) : null;
     }
 
     public function current_for_user($user_id)
     {
+        $user_id = (int) $user_id;
         $this->mark_missed_for_user($user_id);
-        $out  = ['active' => null, 'draft' => null];
-        $rows = $this->db->raw(
-            "SELECT * FROM training_plans WHERE user_id = ? AND status IN ('active','draft') ORDER BY id DESC",
-            [(int) $user_id]
-        )->fetchAll(PDO::FETCH_ASSOC);
 
-        foreach ($rows as $r) {
-            if ($out[$r['status']] === null) {
-                $out[$r['status']] = $this->with_sessions($r);
+        $out = [
+            'active' => null,
+            'draft' => null,
+        ];
+
+        $rows = $this->db->table($this->table)
+            ->where('user_id', $user_id)
+            ->in('status', ['active', 'draft'])
+            ->order_by('id', 'DESC')
+            ->get_all();
+
+        foreach ($rows as $row) {
+            if ($out[$row['status']] === null) {
+                $out[$row['status']] = $this->with_sessions($row);
             }
         }
 
         if ($out['active'] !== null) {
             $out['active']['pending_revision'] = $this->pending_revision_for_plan(
-                (int) $user_id,
+                $user_id,
                 (int) $out['active']['plan']['id']
             );
         }
@@ -316,27 +456,53 @@ class PlanModel extends Model {
         $user_id = (int) $user_id;
         $plan_id = (int) $plan_id;
 
-        $draft = $this->db->raw(
-            "SELECT id, version FROM training_plans WHERE id = ? AND user_id = ? AND status = 'draft' LIMIT 1",
-            [$plan_id, $user_id]
-        )->fetch(PDO::FETCH_ASSOC);
+        $draft = $this->db->table($this->table)
+            ->select('id, version')
+            ->where('id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('status', 'draft')
+            ->limit(1)
+            ->get();
+
         if (!$draft) {
             return null;
         }
 
         $now_utc = gmdate('Y-m-d H:i:s');
         $this->db->transaction();
-        $this->db->raw(
-            "UPDATE training_plans SET status = 'archived', updated_at = CURRENT_TIMESTAMP
-              WHERE user_id = ? AND status = 'active'",
-            [$user_id]
+
+        $this->db->table($this->table)
+            ->where('user_id', $user_id)
+            ->where('status', 'active')
+            ->update([
+                'status' => 'archived',
+                'updated_at' => $now_utc,
+            ]);
+
+        $updated = $this->db->table($this->table)
+            ->where('id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('status', 'draft')
+            ->update([
+                'status' => 'active',
+                'approved_at' => $now_utc,
+                'updated_at' => $now_utc,
+            ]);
+
+        if ((int) $updated !== 1) {
+            $this->db->roll_back();
+            return null;
+        }
+
+        $this->add_revision(
+            $user_id,
+            $plan_id,
+            null,
+            (int) $draft['version'],
+            'Plan approved',
+            null
         );
-        $this->db->raw(
-            "UPDATE training_plans SET status = 'active', approved_at = ?, updated_at = CURRENT_TIMESTAMP
-              WHERE id = ? AND user_id = ?",
-            [$now_utc, $plan_id, $user_id]
-        );
-        $this->add_revision($user_id, $plan_id, null, (int) $draft['version'], 'Plan approved', null);
+
         $this->db->commit();
 
         return $this->find_for_user($user_id, $plan_id);
@@ -344,23 +510,34 @@ class PlanModel extends Model {
 
     public function discard_draft_for_user($user_id, $plan_id)
     {
-        $uid = (int) $user_id;
-        $pid = (int) $plan_id;
+        $user_id = (int) $user_id;
+        $plan_id = (int) $plan_id;
 
-        $draft = $this->db->raw(
-            "SELECT id FROM training_plans WHERE id = ? AND user_id = ? AND status = 'draft' LIMIT 1",
-            [$pid, $uid]
-        )->fetch(PDO::FETCH_ASSOC);
+        $draft = $this->db->table($this->table)
+            ->select('id')
+            ->where('id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('status', 'draft')
+            ->limit(1)
+            ->get();
+
         if (!$draft) {
             return false;
         }
 
         $this->db->transaction();
-        $this->db->raw('DELETE FROM training_sessions WHERE plan_id = ? AND user_id = ?', [$pid, $uid]);
-        $this->db->raw(
-            "DELETE FROM training_plans WHERE id = ? AND user_id = ? AND status = 'draft'",
-            [$pid, $uid]
-        );
+
+        $this->db->table('training_sessions')
+            ->where('plan_id', $plan_id)
+            ->where('user_id', $user_id)
+            ->delete();
+
+        $this->db->table($this->table)
+            ->where('id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('status', 'draft')
+            ->delete();
+
         $this->db->commit();
 
         return true;
@@ -368,142 +545,217 @@ class PlanModel extends Model {
 
     public function mark_missed_for_user($user_id, ?DateTimeImmutable $today = null)
     {
-        $ref    = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
+        $user_id = (int) $user_id;
+        $ref = $today ?: new DateTimeImmutable('today', new DateTimeZone('UTC'));
         $cutoff = $ref->modify('-1 day')->format('Y-m-d');
 
-        $this->db->raw(
-            "UPDATE training_sessions
-                SET status = 'missed', updated_at = CURRENT_TIMESTAMP
-              WHERE user_id = ?
-                AND status = 'planned'
-                AND scheduled_date < ?
-                AND plan_id IN (
-                    SELECT id FROM training_plans WHERE user_id = ? AND status = 'active'
-                )",
-            [(int) $user_id, $cutoff, (int) $user_id]
-        );
+        $active_plans = $this->db->table($this->table)
+            ->select('id')
+            ->where('user_id', $user_id)
+            ->where('status', 'active')
+            ->get_all();
+
+        $plan_ids = array_map('intval', array_column($active_plans, 'id'));
+        if (!$plan_ids) {
+            return;
+        }
+
+        $this->db->table('training_sessions')
+            ->where('user_id', $user_id)
+            ->where('status', 'planned')
+            ->where('scheduled_date', '<', $cutoff)
+            ->in('plan_id', $plan_ids)
+            ->update([
+                'status' => 'missed',
+                'updated_at' => gmdate('Y-m-d H:i:s'),
+            ]);
     }
 
-    // Returns the updated session, null if not found, false if it is already completed
+    /**
+     * Returns the updated session, null if not found, or false if completed.
+     */
     public function set_session_status($user_id, $session_id, $status, $skip_reason = null)
     {
-        $uid = (int) $user_id;
-        $sid = (int) $session_id;
+        $user_id = (int) $user_id;
+        $session_id = (int) $session_id;
 
-        $row = $this->db->raw(
-            "SELECT s.id, s.plan_id, s.scheduled_date, s.type, s.status
-               FROM training_sessions s
-               JOIN training_plans p ON p.id = s.plan_id
-              WHERE s.id = ? AND s.user_id = ? AND p.status = 'active' LIMIT 1",
-            [$sid, $uid]
-        )->fetch(PDO::FETCH_ASSOC);
+        $row = $this->db->table('training_sessions')
+            ->select('id, plan_id, scheduled_date, type, status')
+            ->where('id', $session_id)
+            ->where('user_id', $user_id)
+            ->limit(1)
+            ->get();
 
         if (!$row) {
             return null;
         }
+
+        $active_plan = $this->db->table($this->table)
+            ->select('id')
+            ->where('id', (int) $row['plan_id'])
+            ->where('user_id', $user_id)
+            ->where('status', 'active')
+            ->limit(1)
+            ->get();
+
+        if (!$active_plan) {
+            return null;
+        }
+
         if ($row['status'] === 'completed') {
             return false;
         }
 
         $clean_reason = null;
-        if ($status === 'skipped' && $skip_reason !== null && trim((string) $skip_reason) !== '') {
+        if (
+            $status === 'skipped'
+            && $skip_reason !== null
+            && trim((string) $skip_reason) !== ''
+        ) {
             $clean_reason = mb_substr(trim((string) $skip_reason), 0, 255);
         }
 
+        $now_utc = gmdate('Y-m-d H:i:s');
+
         $this->db->transaction();
-        $this->db->raw(
-            "UPDATE training_sessions
-                SET status = ?, skip_reason = ?, updated_at = CURRENT_TIMESTAMP
-              WHERE id = ? AND user_id = ? AND status <> 'completed'",
-            [$status, $clean_reason, $sid, $uid]
-        );
+
+        $updated = $this->db->table('training_sessions')
+            ->where('id', $session_id)
+            ->where('user_id', $user_id)
+            ->not_where('status', 'completed')
+            ->update([
+                'status' => $status,
+                'skip_reason' => $clean_reason,
+                'updated_at' => $now_utc,
+            ]);
+
+        if ((int) $updated !== 1) {
+            $this->db->roll_back();
+            return false;
+        }
 
         $summary = $status === 'skipped'
             ? ('Skipped ' . $row['type'] . ' run on ' . $row['scheduled_date'])
             : ('Restored ' . $row['type'] . ' run on ' . $row['scheduled_date'] . ' to planned');
 
-        $this->bump_version($uid, (int) $row['plan_id'], $summary, $clean_reason);
+        $this->bump_version(
+            $user_id,
+            (int) $row['plan_id'],
+            $summary,
+            $clean_reason
+        );
+
         $this->db->commit();
 
-        $s = $this->db->raw(
-            'SELECT id, scheduled_date, planned_start_time, type, planned_distance_km,
-                    planned_duration_seconds, status, skip_reason, notes
-               FROM training_sessions WHERE id = ? AND user_id = ?',
-            [$sid, $uid]
-        )->fetch(PDO::FETCH_ASSOC);
+        $session = $this->db->table('training_sessions')
+            ->select(
+                'id, scheduled_date, planned_start_time, type, planned_distance_km, '
+                . 'planned_duration_seconds, status, skip_reason, notes'
+            )
+            ->where('id', $session_id)
+            ->where('user_id', $user_id)
+            ->limit(1)
+            ->get();
 
-        return $this->present_session($s);
+        return $session ? $this->present_session($session) : null;
     }
 
-    private function present_session(array $s)
+    private function present_session(array $session)
     {
         return [
-            'id'                       => (int) $s['id'],
-            'scheduled_date'           => $s['scheduled_date'],
-            'planned_start_time'       => $s['planned_start_time'] ?? null,
-            'type'                     => $s['type'],
-            'planned_distance_km'      => $s['planned_distance_km'] !== null ? (float) $s['planned_distance_km'] : null,
-            'planned_duration_seconds' => $s['planned_duration_seconds'] !== null ? (int) $s['planned_duration_seconds'] : null,
-            'status'                   => $s['status'],
-            'skip_reason'              => $s['skip_reason'] ?? null,
-            'notes'                    => $s['notes'],
+            'id' => (int) $session['id'],
+            'scheduled_date' => $session['scheduled_date'],
+            'planned_start_time' => $session['planned_start_time'] ?? null,
+            'type' => $session['type'],
+            'planned_distance_km' => $session['planned_distance_km'] !== null
+                ? (float) $session['planned_distance_km']
+                : null,
+            'planned_duration_seconds' => $session['planned_duration_seconds'] !== null
+                ? (int) $session['planned_duration_seconds']
+                : null,
+            'status' => $session['status'],
+            'skip_reason' => $session['skip_reason'] ?? null,
+            'notes' => $session['notes'],
         ];
     }
 
     // ---------- revisions ----------
+
     private function current_snapshot($user_id, $plan_id)
     {
-        return $this->db->raw(
-            'SELECT id, scheduled_date, planned_start_time, type, planned_distance_km,
-                    planned_duration_seconds, status, skip_reason
-               FROM training_sessions WHERE plan_id = ? AND user_id = ? ORDER BY scheduled_date',
-            [(int) $plan_id, (int) $user_id]
-        )->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        return $this->db->table('training_sessions')
+            ->select(
+                'id, scheduled_date, planned_start_time, type, planned_distance_km, '
+                . 'planned_duration_seconds, status, skip_reason'
+            )
+            ->where('plan_id', (int) $plan_id)
+            ->where('user_id', (int) $user_id)
+            ->order_by('scheduled_date')
+            ->get_all() ?: [];
     }
 
-    private function add_revision($user_id, $plan_id, $prev_version, $new_version, $summary, $reason = null)
-    {
+    private function add_revision(
+        $user_id,
+        $plan_id,
+        $prev_version,
+        $new_version,
+        $summary,
+        $reason = null
+    ) {
         $snapshot = $this->current_snapshot($user_id, $plan_id);
-        $now_utc  = gmdate('Y-m-d H:i:s');
-        $clean_r  = ($reason !== null && trim((string) $reason) !== '')
+        $now_utc = gmdate('Y-m-d H:i:s');
+
+        $clean_reason = ($reason !== null && trim((string) $reason) !== '')
             ? mb_substr(trim((string) $reason), 0, 255)
             : null;
 
-        $this->db->raw(
-            'INSERT INTO plan_revisions
-               (plan_id, user_id, version, previous_version, resulting_version,
-                decision, change_summary, reason, snapshot_json, decision_timestamp)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [
-                (int) $plan_id,
-                (int) $user_id,
-                (int) $new_version,
-                $prev_version !== null ? (int) $prev_version : null,
-                (int) $new_version,
-                'applied',
-                mb_substr((string) $summary, 0, 255),
-                $clean_r,
-                json_encode($snapshot),
-                $now_utc,
-            ]
-        );
+        $this->db->table('plan_revisions')->insert([
+            'plan_id' => (int) $plan_id,
+            'user_id' => (int) $user_id,
+            'version' => (int) $new_version,
+            'previous_version' => $prev_version !== null ? (int) $prev_version : null,
+            'resulting_version' => (int) $new_version,
+            'decision' => 'applied',
+            'change_summary' => mb_substr((string) $summary, 0, 255),
+            'reason' => $clean_reason,
+            'snapshot_json' => json_encode($snapshot),
+            'decision_timestamp' => $now_utc,
+        ]);
     }
 
     private function bump_version($user_id, $plan_id, $summary, $reason = null)
     {
-        $prev = (int) $this->db->raw(
-            'SELECT version FROM training_plans WHERE id = ? AND user_id = ?',
-            [(int) $plan_id, (int) $user_id]
-        )->fetchColumn();
+        $user_id = (int) $user_id;
+        $plan_id = (int) $plan_id;
 
-        $this->db->raw(
-            'UPDATE training_plans SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
-            [(int) $plan_id, (int) $user_id]
+        $plan = $this->db->table($this->table)
+            ->select('version')
+            ->where('id', $plan_id)
+            ->where('user_id', $user_id)
+            ->limit(1)
+            ->get();
+
+        $prev_version = $plan ? (int) $plan['version'] : 0;
+        $next_version = $prev_version + 1;
+
+        $this->db->table($this->table)
+            ->where('id', $plan_id)
+            ->where('user_id', $user_id)
+            ->update([
+                'version' => $next_version,
+                'updated_at' => gmdate('Y-m-d H:i:s'),
+            ]);
+
+        $this->add_revision(
+            $user_id,
+            $plan_id,
+            $prev_version,
+            $next_version,
+            $summary,
+            $reason
         );
 
-        $next = $prev + 1;
-        $this->add_revision($user_id, $plan_id, $prev, $next, $summary, $reason);
-        return $next;
+        return $next_version;
     }
 
     private function insert_sessions($plan_id, $user_id, array $sessions)
@@ -511,41 +763,35 @@ class PlanModel extends Model {
         if (!$sessions) {
             return;
         }
+
         $rows = [];
-        $args = [];
-        foreach ($sessions as $s) {
-            $rows[] = '(?, ?, ?, ?, ?, ?, ?, ?, ?)';
-            array_push(
-                $args,
-                (int) $plan_id,
-                (int) $user_id,
-                $s['scheduled_date'],
-                $s['planned_start_time'] ?? null,
-                $s['type'],
-                $s['planned_distance_km'],
-                $s['planned_duration_seconds'],
-                'planned',
-                $s['notes']
-            );
+        foreach ($sessions as $session) {
+            $rows[] = [
+                'plan_id' => (int) $plan_id,
+                'user_id' => (int) $user_id,
+                'scheduled_date' => $session['scheduled_date'],
+                'planned_start_time' => $session['planned_start_time'] ?? null,
+                'type' => $session['type'],
+                'planned_distance_km' => $session['planned_distance_km'],
+                'planned_duration_seconds' => $session['planned_duration_seconds'],
+                'status' => 'planned',
+                'notes' => $session['notes'],
+            ];
         }
-        $this->db->raw(
-            'INSERT INTO training_sessions
-               (plan_id, user_id, scheduled_date, planned_start_time, type,
-                planned_distance_km, planned_duration_seconds, status, notes)
-             VALUES ' . implode(', ', $rows),
-            $args
-        );
+
+        $this->db->table('training_sessions')->bulk_insert($rows);
     }
 
     public function pending_revision_for_plan($user_id, $plan_id)
     {
-        $row = $this->db->raw(
-            "SELECT id, previous_version, reason, proposed_changes, created_at
-               FROM plan_revisions
-              WHERE plan_id = ? AND user_id = ? AND decision = 'pending'
-              ORDER BY id DESC LIMIT 1",
-            [(int) $plan_id, (int) $user_id]
-        )->fetch(PDO::FETCH_ASSOC);
+        $row = $this->db->table('plan_revisions')
+            ->select('id, previous_version, reason, proposed_changes, created_at')
+            ->where('plan_id', (int) $plan_id)
+            ->where('user_id', (int) $user_id)
+            ->where('decision', 'pending')
+            ->order_by('id', 'DESC')
+            ->limit(1)
+            ->get();
 
         if (!$row) {
             return null;
@@ -565,166 +811,256 @@ class PlanModel extends Model {
         );
     }
 
-    private function present_pending_proposal($rev_id, $prev_version, $reason, array $proposal, $created_at)
-    {
+    private function present_pending_proposal(
+        $revision_id,
+        $prev_version,
+        $reason,
+        array $proposal,
+        $created_at
+    ) {
         return [
-            'id'                  => (int) $rev_id,
-            'decision'            => 'pending',
-            'previous_version'    => (int) $prev_version,
-            'reason'              => $reason,
-            'from_date'           => $proposal['from_date'] ?? null,
-            'plan'                => $proposal['plan'] ?? null,
-            'warnings'            => $proposal['warnings'] ?? [],
-            'replaced_count'      => (int) ($proposal['replaced_count'] ?? 0),
+            'id' => (int) $revision_id,
+            'decision' => 'pending',
+            'previous_version' => (int) $prev_version,
+            'reason' => $reason,
+            'from_date' => $proposal['from_date'] ?? null,
+            'plan' => $proposal['plan'] ?? null,
+            'warnings' => $proposal['warnings'] ?? [],
+            'replaced_count' => (int) ($proposal['replaced_count'] ?? 0),
             'preserved_completed' => (int) ($proposal['preserved_completed'] ?? 0),
-            'proposed_count'      => (int) ($proposal['proposed_count'] ?? 0),
-            'sessions'            => $proposal['sessions'] ?? [],
-            'created_at'          => $created_at,
+            'proposed_count' => (int) ($proposal['proposed_count'] ?? 0),
+            'sessions' => $proposal['sessions'] ?? [],
+            'created_at' => $created_at,
         ];
     }
 
     public function revisions_for_user($user_id, $plan_id)
     {
-        $owned = $this->db->raw(
-            'SELECT id FROM training_plans WHERE id = ? AND user_id = ? LIMIT 1',
-            [(int) $plan_id, (int) $user_id]
-        )->fetch(PDO::FETCH_ASSOC);
+        $user_id = (int) $user_id;
+        $plan_id = (int) $plan_id;
+
+        $owned = $this->db->table($this->table)
+            ->select('id')
+            ->where('id', $plan_id)
+            ->where('user_id', $user_id)
+            ->limit(1)
+            ->get();
+
         if (!$owned) {
             return null;
         }
 
-        $rows = $this->db->raw(
-            'SELECT id, version, previous_version, resulting_version, decision,
-                    change_summary, reason, created_at, decision_timestamp
-               FROM plan_revisions
-              WHERE plan_id = ? AND user_id = ?
-              ORDER BY id DESC',
-            [(int) $plan_id, (int) $user_id]
-        )->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $this->db->table('plan_revisions')
+            ->select(
+                'id, version, previous_version, resulting_version, decision, '
+                . 'change_summary, reason, created_at, decision_timestamp'
+            )
+            ->where('plan_id', $plan_id)
+            ->where('user_id', $user_id)
+            ->order_by('id', 'DESC')
+            ->get_all();
 
-        return array_map(fn($r) => [
-            'id'                 => (int) $r['id'],
-            'version'            => (int) $r['version'],
-            'previous_version'   => $r['previous_version'] !== null ? (int) $r['previous_version'] : null,
-            'resulting_version'  => $r['resulting_version'] !== null ? (int) $r['resulting_version'] : null,
-            'decision'           => $r['decision'] ?? 'applied',
-            'summary'            => $r['change_summary'],
-            'reason'             => $r['reason'] ?? null,
-            'created_at'         => $r['created_at'],
-            'decision_timestamp' => $r['decision_timestamp'] ?? null,
+        return array_map(fn($row) => [
+            'id' => (int) $row['id'],
+            'version' => (int) $row['version'],
+            'previous_version' => $row['previous_version'] !== null
+                ? (int) $row['previous_version']
+                : null,
+            'resulting_version' => $row['resulting_version'] !== null
+                ? (int) $row['resulting_version']
+                : null,
+            'decision' => $row['decision'] ?? 'applied',
+            'summary' => $row['change_summary'],
+            'reason' => $row['reason'] ?? null,
+            'created_at' => $row['created_at'],
+            'decision_timestamp' => $row['decision_timestamp'] ?? null,
         ], $rows);
     }
 
-    // Returns [session, null] or [null, [http_status, message]]
+    /**
+     * Returns [session, null] or [null, [http_status, message]].
+     */
     public function reschedule_session($user_id, $session_id, $new_date)
     {
-        $uid = (int) $user_id;
+        $user_id = (int) $user_id;
+        $session_id = (int) $session_id;
         $utc = new DateTimeZone('UTC');
 
-        $s = $this->db->raw(
-            "SELECT s.id, s.plan_id, s.scheduled_date, s.type, s.status, p.goal, p.start_date, p.end_date
-               FROM training_sessions s JOIN training_plans p ON p.id = s.plan_id
-              WHERE s.id = ? AND s.user_id = ? AND p.status = 'active' LIMIT 1",
-            [(int) $session_id, $uid]
-        )->fetch(PDO::FETCH_ASSOC);
+        $session = $this->db->table('training_sessions')
+            ->select('id, plan_id, scheduled_date, type, status')
+            ->where('id', $session_id)
+            ->where('user_id', $user_id)
+            ->limit(1)
+            ->get();
 
-        if (!$s) {
+        if (!$session) {
             return [null, [404, 'Session not found.']];
         }
-        if ($s['status'] === 'completed') {
-            return [null, [409, 'A completed run cannot be moved.']];
-        }
-        if ($s['type'] === 'race') {
-            return [null, [422, 'Race day cannot be moved. Change your race date in your profile and rebuild the plan.']];
+
+        $plan = $this->db->table($this->table)
+            ->select('id, goal, start_date, end_date')
+            ->where('id', (int) $session['plan_id'])
+            ->where('user_id', $user_id)
+            ->where('status', 'active')
+            ->limit(1)
+            ->get();
+
+        if (!$plan) {
+            return [null, [404, 'Session not found.']];
         }
 
-        $d = DateTimeImmutable::createFromFormat('!Y-m-d', $new_date, $utc);
-        if (!$d || $d->format('Y-m-d') !== $new_date) {
+        $session = array_merge($session, $plan);
+
+        if ($session['status'] === 'completed') {
+            return [null, [409, 'A completed run cannot be moved.']];
+        }
+
+        if ($session['type'] === 'race') {
+            return [
+                null,
+                [
+                    422,
+                    'Race day cannot be moved. Change your race date in your profile and rebuild the plan.',
+                ],
+            ];
+        }
+
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d', $new_date, $utc);
+        if (!$date || $date->format('Y-m-d') !== $new_date) {
             return [null, [422, 'Enter a valid date.']];
         }
 
-        $min  = max((new DateTimeImmutable('today', $utc))->modify('-1 day')->format('Y-m-d'), $s['start_date']);
-        $last = $s['goal'] === 'general_fitness'
-            ? $s['end_date']
-            : (new DateTimeImmutable($s['end_date'], $utc))->modify('-2 days')->format('Y-m-d');
+        $min = max(
+            (new DateTimeImmutable('today', $utc))->modify('-1 day')->format('Y-m-d'),
+            $session['start_date']
+        );
+
+        $last = $session['goal'] === 'general_fitness'
+            ? $session['end_date']
+            : (new DateTimeImmutable($session['end_date'], $utc))
+                ->modify('-2 days')
+                ->format('Y-m-d');
 
         if ($new_date < $min || $new_date > $last) {
             return [null, [422, "Choose a date between $min and $last."]];
         }
-        if ($new_date === $s['scheduled_date']) {
+
+        if ($new_date === $session['scheduled_date']) {
             return [null, [422, 'That is already the date of this session.']];
         }
 
-        $busy = $this->db->raw(
-            'SELECT id FROM training_sessions WHERE plan_id = ? AND scheduled_date = ? LIMIT 1',
-            [(int) $s['plan_id'], $new_date]
-        )->fetch(PDO::FETCH_ASSOC);
+        $busy = $this->db->table('training_sessions')
+            ->select('id')
+            ->where('plan_id', (int) $session['plan_id'])
+            ->where('scheduled_date', $new_date)
+            ->limit(1)
+            ->get();
+
         if ($busy) {
             return [null, [422, 'Another session is already planned on that day.']];
         }
 
         $this->db->transaction();
-        $this->db->raw(
-            "UPDATE training_sessions
-                SET scheduled_date = ?, status = 'planned', skip_reason = NULL, updated_at = CURRENT_TIMESTAMP
-              WHERE id = ? AND user_id = ?",
-            [$new_date, (int) $session_id, $uid]
+
+        $this->db->table('training_sessions')
+            ->where('id', $session_id)
+            ->where('user_id', $user_id)
+            ->update([
+                'scheduled_date' => $new_date,
+                'status' => 'planned',
+                'skip_reason' => null,
+                'updated_at' => gmdate('Y-m-d H:i:s'),
+            ]);
+
+        $this->bump_version(
+            $user_id,
+            (int) $session['plan_id'],
+            'Moved ' . $session['type'] . ' run from '
+                . $session['scheduled_date'] . ' to ' . $new_date
         );
-        $this->bump_version($uid, (int) $s['plan_id'],
-            'Moved ' . $s['type'] . ' run from ' . $s['scheduled_date'] . ' to ' . $new_date);
+
         $this->db->commit();
 
-        $row = $this->db->raw(
-            'SELECT id, scheduled_date, planned_start_time, type, planned_distance_km,
-                    planned_duration_seconds, status, skip_reason, notes
-               FROM training_sessions WHERE id = ? AND user_id = ?',
-            [(int) $session_id, $uid]
-        )->fetch(PDO::FETCH_ASSOC);
+        $updated_session = $this->db->table('training_sessions')
+            ->select(
+                'id, scheduled_date, planned_start_time, type, planned_distance_km, '
+                . 'planned_duration_seconds, status, skip_reason, notes'
+            )
+            ->where('id', $session_id)
+            ->where('user_id', $user_id)
+            ->limit(1)
+            ->get();
 
-        return [$this->present_session($row), null];
+        return [$this->present_session($updated_session), null];
     }
 
     /**
-     * Step 1 of two-step rebuild (Spec D1 / Module 4): generate a validated
-     * rebuild preview and store it as a `pending` revision WITHOUT mutating
-     * live `training_sessions`.
+     * Step 1 of two-step rebuild: generate a validated rebuild preview and
+     * store it as a pending revision without mutating live sessions.
      *
-     * Returns [proposal, null], [null, 'not_found'], or [null, [field => msg]]
+     * Returns [proposal, null], [null, 'not_found'], or [null, [field => msg]].
      */
-    public function propose_rebuild($user_id, $plan_id, array $profile, DateTimeImmutable $today, $recent_long, $reason = null)
-    {
-        $uid = (int) $user_id;
-        $pid = (int) $plan_id;
+    public function propose_rebuild(
+        $user_id,
+        $plan_id,
+        array $profile,
+        DateTimeImmutable $today,
+        $recent_long,
+        $reason = null
+    ) {
+        $user_id = (int) $user_id;
+        $plan_id = (int) $plan_id;
 
-        $plan = $this->db->raw(
-            "SELECT id, version FROM training_plans WHERE id = ? AND user_id = ? AND status = 'active' LIMIT 1",
-            [$pid, $uid]
-        )->fetch(PDO::FETCH_ASSOC);
+        $plan = $this->db->table($this->table)
+            ->select('id, version')
+            ->where('id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('status', 'active')
+            ->limit(1)
+            ->get();
+
         if (!$plan) {
             return [null, 'not_found'];
         }
 
-        [$built, $errors] = $this->build($profile, $today, ['rebuild' => true, 'start_long' => $recent_long]);
+        [$built, $errors] = $this->build(
+            $profile,
+            $today,
+            [
+                'rebuild' => true,
+                'start_long' => $recent_long,
+            ]
+        );
+
         if ($errors) {
             return [null, $errors];
         }
 
         $start = $built['plan']['start_date'];
-        $taken = array_column($this->db->raw(
-            "SELECT scheduled_date FROM training_sessions
-              WHERE plan_id = ? AND user_id = ? AND scheduled_date >= ? AND status = 'completed'",
-            [$pid, $uid, $start]
-        )->fetchAll(PDO::FETCH_ASSOC), 'scheduled_date');
 
-        $replaced_count = (int) $this->db->raw(
-            "SELECT COUNT(*) FROM training_sessions
-              WHERE plan_id = ? AND user_id = ? AND scheduled_date >= ? AND status <> 'completed'",
-            [$pid, $uid, $start]
-        )->fetchColumn();
+        $completed_rows = $this->db->table('training_sessions')
+            ->select('scheduled_date')
+            ->where('plan_id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('scheduled_date', '>=', $start)
+            ->where('status', 'completed')
+            ->get_all();
+
+        $taken = array_column($completed_rows, 'scheduled_date');
+
+        $replaceable_rows = $this->db->table('training_sessions')
+            ->select('id')
+            ->where('plan_id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('scheduled_date', '>=', $start)
+            ->not_where('status', 'completed')
+            ->get_all();
+
+        $replaced_count = count($replaceable_rows);
 
         $proposed_sessions = array_values(array_filter(
             $built['sessions'],
-            fn($s) => !in_array($s['scheduled_date'], $taken, true)
+            fn($session) => !in_array($session['scheduled_date'], $taken, true)
         ));
 
         $clean_reason = ($reason !== null && trim((string) $reason) !== '')
@@ -732,197 +1068,257 @@ class PlanModel extends Model {
             : null;
 
         $proposal_payload = [
-            'from_date'           => $start,
-            'plan'                => $built['plan'],
-            'warnings'            => $built['warnings'],
-            'replaced_count'      => $replaced_count,
+            'from_date' => $start,
+            'plan' => $built['plan'],
+            'warnings' => $built['warnings'],
+            'replaced_count' => $replaced_count,
             'preserved_completed' => count($taken),
-            'proposed_count'      => count($proposed_sessions),
-            'sessions'            => $proposed_sessions,
+            'proposed_count' => count($proposed_sessions),
+            'sessions' => $proposed_sessions,
         ];
 
-        $now_utc  = gmdate('Y-m-d H:i:s');
-        $cur_ver  = (int) $plan['version'];
-        $snapshot = $this->current_snapshot($uid, $pid);
-        $summary  = 'Proposed rebuild from ' . $start . ' (' . count($proposed_sessions) . ' upcoming sessions)';
+        $now_utc = gmdate('Y-m-d H:i:s');
+        $current_version = (int) $plan['version'];
+        $snapshot = $this->current_snapshot($user_id, $plan_id);
+        $summary = 'Proposed rebuild from ' . $start . ' ('
+            . count($proposed_sessions) . ' upcoming sessions)';
 
         $this->db->transaction();
-        // Supersede any older pending proposal on this plan
-        $this->db->raw(
-            "UPDATE plan_revisions
-                SET decision = 'rejected', decision_timestamp = ?
-              WHERE plan_id = ? AND user_id = ? AND decision = 'pending'",
-            [$now_utc, $pid, $uid]
-        );
+
+        // Supersede any older pending proposal on this plan.
+        $this->db->table('plan_revisions')
+            ->where('plan_id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('decision', 'pending')
+            ->update([
+                'decision' => 'rejected',
+                'decision_timestamp' => $now_utc,
+            ]);
 
         $this->db->table('plan_revisions')->insert([
-            'plan_id'            => $pid,
-            'user_id'            => $uid,
-            'version'            => $cur_ver,
-            'previous_version'   => $cur_ver,
-            'resulting_version'  => null,
-            'decision'           => 'pending',
-            'change_summary'     => mb_substr($summary, 0, 255),
-            'reason'             => $clean_reason,
-            'snapshot_json'      => json_encode($snapshot),
-            'proposed_changes'   => json_encode($proposal_payload),
+            'plan_id' => $plan_id,
+            'user_id' => $user_id,
+            'version' => $current_version,
+            'previous_version' => $current_version,
+            'resulting_version' => null,
+            'decision' => 'pending',
+            'change_summary' => mb_substr($summary, 0, 255),
+            'reason' => $clean_reason,
+            'snapshot_json' => json_encode($snapshot),
+            'proposed_changes' => json_encode($proposal_payload),
             'decision_timestamp' => null,
-            'created_at'         => $now_utc,
+            'created_at' => $now_utc,
         ]);
-        $rev_id = (int) $this->db->last_id();
+
+        $revision_id = (int) $this->db->last_id();
         $this->db->commit();
 
-        return [$this->present_pending_proposal($rev_id, $cur_ver, $clean_reason, $proposal_payload, $now_utc), null];
+        return [
+            $this->present_pending_proposal(
+                $revision_id,
+                $current_version,
+                $clean_reason,
+                $proposal_payload,
+                $now_utc
+            ),
+            null,
+        ];
     }
 
     /**
-     * Step 2a of two-step rebuild: apply a `pending` revision proposal, bump
+     * Step 2a of two-step rebuild: apply a pending revision proposal, bump
      * plan version, preserve completed runs, and return the updated plan.
      *
-     * Returns [data, null] or [null, 'not_found']
+     * Returns [data, null] or [null, 'not_found'].
      */
     public function apply_revision($user_id, $plan_id, $revision_id)
     {
-        $uid = (int) $user_id;
-        $pid = (int) $plan_id;
-        $rid = (int) $revision_id;
+        $user_id = (int) $user_id;
+        $plan_id = (int) $plan_id;
+        $revision_id = (int) $revision_id;
 
-        $plan = $this->db->raw(
-            "SELECT id, version FROM training_plans WHERE id = ? AND user_id = ? AND status = 'active' LIMIT 1",
-            [$pid, $uid]
-        )->fetch(PDO::FETCH_ASSOC);
+        $plan = $this->db->table($this->table)
+            ->select('id, version')
+            ->where('id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('status', 'active')
+            ->limit(1)
+            ->get();
+
         if (!$plan) {
             return [null, 'not_found'];
         }
 
-        $rev = $this->db->raw(
-            "SELECT id, proposed_changes FROM plan_revisions
-              WHERE id = ? AND plan_id = ? AND user_id = ? AND decision = 'pending' LIMIT 1",
-            [$rid, $pid, $uid]
-        )->fetch(PDO::FETCH_ASSOC);
-        if (!$rev) {
+        $revision = $this->db->table('plan_revisions')
+            ->select('id, proposed_changes')
+            ->where('id', $revision_id)
+            ->where('plan_id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('decision', 'pending')
+            ->limit(1)
+            ->get();
+
+        if (!$revision) {
             return [null, 'not_found'];
         }
 
-        $proposal = json_decode((string) ($rev['proposed_changes'] ?? ''), true);
+        $proposal = json_decode((string) ($revision['proposed_changes'] ?? ''), true);
         if (!is_array($proposal) || empty($proposal['plan']) || !isset($proposal['sessions'])) {
             return [null, 'not_found'];
         }
 
-        $start    = (string) $proposal['from_date'];
+        $start = (string) $proposal['from_date'];
         $new_plan = $proposal['plan'];
 
-        // Re-check completed dates at apply time so runs logged after preview stay protected
-        $taken = array_column($this->db->raw(
-            "SELECT scheduled_date FROM training_sessions
-              WHERE plan_id = ? AND user_id = ? AND scheduled_date >= ? AND status = 'completed'",
-            [$pid, $uid, $start]
-        )->fetchAll(PDO::FETCH_ASSOC), 'scheduled_date');
+        // Re-check completed dates at apply time so runs logged after preview stay protected.
+        $completed_rows = $this->db->table('training_sessions')
+            ->select('scheduled_date')
+            ->where('plan_id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('scheduled_date', '>=', $start)
+            ->where('status', 'completed')
+            ->get_all();
+
+        $taken = array_column($completed_rows, 'scheduled_date');
 
         $sessions = array_values(array_filter(
             $proposal['sessions'],
-            fn($s) => !in_array($s['scheduled_date'], $taken, true)
+            fn($session) => !in_array($session['scheduled_date'], $taken, true)
         ));
 
-        $prev_ver = (int) $plan['version'];
-        $next_ver = $prev_ver + 1;
-        $now_utc  = gmdate('Y-m-d H:i:s');
+        $previous_version = (int) $plan['version'];
+        $next_version = $previous_version + 1;
+        $now_utc = gmdate('Y-m-d H:i:s');
 
         $this->db->transaction();
-        $this->db->raw(
-            "DELETE FROM training_sessions
-              WHERE plan_id = ? AND user_id = ? AND scheduled_date >= ? AND status <> 'completed'",
-            [$pid, $uid, $start]
-        );
-        $this->insert_sessions($pid, $uid, $sessions);
-        $this->db->raw(
-            'UPDATE training_plans
-                SET goal = ?, end_date = ?, sessions_per_week = ?, version = ?, updated_at = CURRENT_TIMESTAMP
-              WHERE id = ? AND user_id = ?',
-            [$new_plan['goal'], $new_plan['end_date'], (int) $new_plan['sessions_per_week'], $next_ver, $pid, $uid]
-        );
 
-        $after_snapshot = $this->current_snapshot($uid, $pid);
-        $summary = 'Applied rebuild from ' . $start . ' (' . count($sessions) . ' upcoming sessions)';
+        $this->db->table('training_sessions')
+            ->where('plan_id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('scheduled_date', '>=', $start)
+            ->not_where('status', 'completed')
+            ->delete();
 
-        $this->db->raw(
-            "UPDATE plan_revisions
-                SET version = ?,
-                    previous_version = ?,
-                    resulting_version = ?,
-                    decision = 'applied',
-                    change_summary = ?,
-                    snapshot_json = ?,
-                    decision_timestamp = ?
-              WHERE id = ? AND plan_id = ? AND user_id = ?",
-            [$next_ver, $prev_ver, $next_ver, mb_substr($summary, 0, 255), json_encode($after_snapshot), $now_utc, $rid, $pid, $uid]
-        );
+        $this->insert_sessions($plan_id, $user_id, $sessions);
+
+        $this->db->table($this->table)
+            ->where('id', $plan_id)
+            ->where('user_id', $user_id)
+            ->update([
+                'goal' => $new_plan['goal'],
+                'end_date' => $new_plan['end_date'],
+                'sessions_per_week' => (int) $new_plan['sessions_per_week'],
+                'version' => $next_version,
+                'updated_at' => $now_utc,
+            ]);
+
+        $after_snapshot = $this->current_snapshot($user_id, $plan_id);
+        $summary = 'Applied rebuild from ' . $start . ' ('
+            . count($sessions) . ' upcoming sessions)';
+
+        $this->db->table('plan_revisions')
+            ->where('id', $revision_id)
+            ->where('plan_id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('decision', 'pending')
+            ->update([
+                'version' => $next_version,
+                'previous_version' => $previous_version,
+                'resulting_version' => $next_version,
+                'decision' => 'applied',
+                'change_summary' => mb_substr($summary, 0, 255),
+                'snapshot_json' => json_encode($after_snapshot),
+                'decision_timestamp' => $now_utc,
+            ]);
+
         $this->db->commit();
 
-        $data = $this->find_for_user($uid, $pid);
+        $data = $this->find_for_user($user_id, $plan_id);
         $data['warnings'] = $proposal['warnings'] ?? [];
+
         return [$data, null];
     }
 
     /**
-     * Step 2b of two-step rebuild: cancel (`reject`) a `pending` revision
-     * proposal without altering any training sessions.
+     * Step 2b of two-step rebuild: cancel a pending revision proposal without
+     * altering any training sessions.
      */
     public function reject_revision($user_id, $plan_id, $revision_id)
     {
-        $uid = (int) $user_id;
-        $pid = (int) $plan_id;
-        $rid = (int) $revision_id;
-
+        $user_id = (int) $user_id;
+        $plan_id = (int) $plan_id;
+        $revision_id = (int) $revision_id;
         $now_utc = gmdate('Y-m-d H:i:s');
-        $stmt = $this->db->raw(
-            "UPDATE plan_revisions
-                SET decision = 'rejected', decision_timestamp = ?
-              WHERE id = ? AND plan_id = ? AND user_id = ? AND decision = 'pending'",
-            [$now_utc, $rid, $pid, $uid]
-        );
 
-        if (!$stmt || (int) $stmt->rowCount() !== 1) {
+        $updated = $this->db->table('plan_revisions')
+            ->where('id', $revision_id)
+            ->where('plan_id', $plan_id)
+            ->where('user_id', $user_id)
+            ->where('decision', 'pending')
+            ->update([
+                'decision' => 'rejected',
+                'decision_timestamp' => $now_utc,
+            ]);
+
+        if ((int) $updated !== 1) {
             return null;
         }
 
         return [
-            'id'                 => $rid,
-            'decision'           => 'rejected',
+            'id' => $revision_id,
+            'decision' => 'rejected',
             'decision_timestamp' => $now_utc,
         ];
     }
 
-    // Legacy immediate helper (kept compatible via propose + apply)
-    public function rebuild_remaining($user_id, $plan_id, array $profile, DateTimeImmutable $today, $recent_long, $reason = null)
-    {
-        [$proposal, $err] = $this->propose_rebuild($user_id, $plan_id, $profile, $today, $recent_long, $reason);
-        if ($err) {
-            return [null, $err];
+    // Legacy immediate helper (kept compatible via propose + apply).
+    public function rebuild_remaining(
+        $user_id,
+        $plan_id,
+        array $profile,
+        DateTimeImmutable $today,
+        $recent_long,
+        $reason = null
+    ) {
+        [$proposal, $error] = $this->propose_rebuild(
+            $user_id,
+            $plan_id,
+            $profile,
+            $today,
+            $recent_long,
+            $reason
+        );
+
+        if ($error) {
+            return [null, $error];
         }
+
         return $this->apply_revision($user_id, $plan_id, $proposal['id']);
     }
 
-    private function with_sessions(array $r)
+    private function with_sessions(array $row)
     {
-        $sessions = $this->db->raw(
-            'SELECT id, scheduled_date, planned_start_time, type, planned_distance_km,
-                    planned_duration_seconds, status, skip_reason, notes
-               FROM training_sessions WHERE plan_id = ? AND user_id = ? ORDER BY scheduled_date',
-            [(int) $r['id'], (int) $r['user_id']]
-        )->fetchAll(PDO::FETCH_ASSOC);
+        $sessions = $this->db->table('training_sessions')
+            ->select(
+                'id, scheduled_date, planned_start_time, type, planned_distance_km, '
+                . 'planned_duration_seconds, status, skip_reason, notes'
+            )
+            ->where('plan_id', (int) $row['id'])
+            ->where('user_id', (int) $row['user_id'])
+            ->order_by('scheduled_date')
+            ->get_all();
 
         return [
             'plan' => [
-                'id'                => (int) $r['id'],
-                'goal'              => $r['goal'],
-                'creation_mode'     => $r['creation_mode'] ?? 'generated',
-                'start_date'        => $r['start_date'],
-                'end_date'          => $r['end_date'],
-                'sessions_per_week' => (int) $r['sessions_per_week'],
-                'status'            => $r['status'],
-                'version'           => (int) $r['version'],
-                'approved_at'       => $r['approved_at'] ?? null,
+                'id' => (int) $row['id'],
+                'goal' => $row['goal'],
+                'creation_mode' => $row['creation_mode'] ?? 'generated',
+                'start_date' => $row['start_date'],
+                'end_date' => $row['end_date'],
+                'sessions_per_week' => (int) $row['sessions_per_week'],
+                'status' => $row['status'],
+                'version' => (int) $row['version'],
+                'approved_at' => $row['approved_at'] ?? null,
             ],
             'sessions' => array_map([$this, 'present_session'], $sessions),
         ];

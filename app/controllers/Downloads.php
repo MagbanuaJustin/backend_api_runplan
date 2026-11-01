@@ -3,8 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Controller: Downloads
- *
- * Serves release files only through authenticated API routes.
+ * 
+ * Automatically generated via CLI.
  */
 class Downloads extends Controller
 {

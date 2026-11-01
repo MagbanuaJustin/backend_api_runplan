@@ -3,13 +3,12 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Model: UserModel
- *
- * Accounts, password policy, anti-enumeration authentication, and account
- * deletion lifecycle.
+ * 
+ * Automatically generated via CLI.
  */
-class UserModel extends Model {
-
-    protected $table       = 'users';
+class UserModel extends Model
+{
+    protected $table        = 'users';
     protected $primary_key = 'id';
     protected $timestamps  = true;
 
@@ -17,26 +16,31 @@ class UserModel extends Model {
 
     /** Password rules, single source of truth so register/reset cannot drift. */
     const PASSWORD_MIN = 8;
-    const PASSWORD_MAX = 72;   // bcrypt silently truncates past this
+    const PASSWORD_MAX = 72; // bcrypt silently truncates past this
 
     public static function password_problem($password)
     {
         $len = strlen((string) $password);
+
         if ($len < self::PASSWORD_MIN) {
             return 'Use at least ' . self::PASSWORD_MIN . ' characters.';
         }
+
         if ($len > self::PASSWORD_MAX) {
             return 'Use at most ' . self::PASSWORD_MAX . ' characters.';
         }
+
         return null;
     }
 
     public static function email_problem($email)
     {
         $email = (string) $email;
+
         if (strlen($email) > 255 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             return 'Enter a valid email address.';
         }
+
         return null;
     }
 
@@ -62,7 +66,12 @@ class UserModel extends Model {
         $provider = strtolower(trim((string) $provider));
         $subject  = trim((string) $subject);
 
-        if ($provider === '' || strlen($provider) > 30 || $subject === '' || strlen($subject) > 191) {
+        if (
+            $provider === ''
+            || strlen($provider) > 30
+            || $subject === ''
+            || strlen($subject) > 191
+        ) {
             return null;
         }
 
@@ -85,6 +94,7 @@ class UserModel extends Model {
         }
 
         $by_subject = $this->find_identity('google', $subject);
+
         if ($by_subject) {
             return (int) $by_subject['user_id'] === $user_id;
         }
@@ -93,6 +103,7 @@ class UserModel extends Model {
             ->where('user_id', $user_id)
             ->where('provider', 'google')
             ->get();
+
         if ($by_user) {
             return hash_equals((string) $by_user['provider_subject'], $subject);
         }
@@ -103,16 +114,20 @@ class UserModel extends Model {
                 'provider'         => 'google',
                 'provider_subject' => $subject,
             ]);
+
             return (int) $inserted > 0;
         } catch (\PDOException $e) {
             // A parallel sign-in may have inserted the same identity first.
             $existing = $this->find_identity('google', $subject);
+
             if ($existing) {
                 return (int) $existing['user_id'] === $user_id;
             }
+
             if ($e->getCode() === '23000') {
                 return false;
             }
+
             throw $e;
         }
     }
@@ -123,6 +138,7 @@ class UserModel extends Model {
             ->where('id', (int) $user_id)
             ->where('status', 'active')
             ->get();
+
         return $user ?: null;
     }
 
@@ -141,7 +157,9 @@ class UserModel extends Model {
         if ($this->has_password($user)) {
             return password_verify((string) $password, $user['password_hash']);
         }
+
         password_hash((string) $password, PASSWORD_DEFAULT); // equalise cost
+
         return false;
     }
 
@@ -166,6 +184,7 @@ class UserModel extends Model {
         }
 
         $this->db->transaction();
+
         try {
             $inserted = $this->db->table($this->table)->insert([
                 'email'         => $email,
@@ -173,6 +192,7 @@ class UserModel extends Model {
                 'role'          => self::ROLE_RUNNER,
                 'status'        => 'active',
             ]);
+
             $user_id = (int) $this->db->last_id();
 
             if ((int) $inserted < 1 || $user_id < 1) {
@@ -192,9 +212,11 @@ class UserModel extends Model {
             $this->db->commit();
         } catch (\PDOException $e) {
             $this->db->roll_back();
+
             if ($e->getCode() === '23000') {
                 return null;
             }
+
             throw $e;
         } catch (\Throwable $e) {
             $this->db->roll_back();
@@ -226,6 +248,7 @@ class UserModel extends Model {
         ]);
 
         $id = (int) $this->db->last_id();
+
         return $this->find($id) ?: [
             'id'            => $id,
             'email'         => $email,
@@ -242,7 +265,7 @@ class UserModel extends Model {
         if ($user && !empty($user['password_hash'])) {
             $ok = password_verify((string) $password, $user['password_hash']);
         } else {
-            password_hash((string) $password, PASSWORD_DEFAULT);   // equalise cost
+            password_hash((string) $password, PASSWORD_DEFAULT); // equalise cost
             $ok = false;
         }
 
@@ -253,7 +276,9 @@ class UserModel extends Model {
         if (password_needs_rehash($user['password_hash'], PASSWORD_DEFAULT)) {
             $this->db->table($this->table)
                 ->where('id', (int) $user['id'])
-                ->update(['password_hash' => password_hash($password, PASSWORD_DEFAULT)]);
+                ->update([
+                    'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                ]);
         }
 
         return $user;
@@ -264,10 +289,14 @@ class UserModel extends Model {
         if (self::password_problem($password) !== null) {
             return false;
         }
-        $this->db->raw(
-            'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [password_hash($password, PASSWORD_DEFAULT), (int) $user_id]
-        );
+
+        $this->db->table($this->table)
+            ->where('id', (int) $user_id)
+            ->update([
+                'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                'updated_at'    => gmdate('Y-m-d H:i:s'),
+            ]);
+
         return true;
     }
 
@@ -279,29 +308,27 @@ class UserModel extends Model {
     {
         $uid  = (int) $user_id;
         $user = $this->find_active($uid);
+
         if (!$user) {
             return null;
         }
 
-        $plans = (int) $this->db->raw(
-            'SELECT COUNT(*) FROM training_plans WHERE user_id = ?',
-            [$uid]
-        )->fetchColumn();
+        $plans = (int) $this->db->table('training_plans')
+            ->where('user_id', $uid)
+            ->count();
 
-        $sessions = (int) $this->db->raw(
-            'SELECT COUNT(*) FROM training_sessions WHERE user_id = ?',
-            [$uid]
-        )->fetchColumn();
+        $sessions = (int) $this->db->table('training_sessions')
+            ->where('user_id', $uid)
+            ->count();
 
-        $activities = (int) $this->db->raw(
-            'SELECT COUNT(*) FROM activities WHERE user_id = ?',
-            [$uid]
-        )->fetchColumn();
+        $activities = (int) $this->db->table('activities')
+            ->where('user_id', $uid)
+            ->count();
 
         $summary = $this->present($user);
-        $summary['status']     = (string) ($user['status'] ?? 'active');
-        $summary['created_at'] = $user['created_at'] ?? null;
-        $summary['updated_at'] = $user['updated_at'] ?? null;
+        $summary['status']      = (string) ($user['status'] ?? 'active');
+        $summary['created_at']  = $user['created_at'] ?? null;
+        $summary['updated_at']  = $user['updated_at'] ?? null;
         $summary['data_counts'] = [
             'plans'      => $plans,
             'sessions'   => $sessions,
@@ -323,11 +350,13 @@ class UserModel extends Model {
     {
         $uid  = (int) $user_id;
         $user = $this->find($uid);
+
         if (!$user) {
             return false;
         }
 
         $clean_reason = null;
+
         if ($reason !== null && trim((string) $reason) !== '') {
             $clean_reason = mb_substr(trim((string) $reason), 0, 255);
         }
@@ -336,6 +365,7 @@ class UserModel extends Model {
         $email_sha256 = hash('sha256', self::normalise_email($user['email']));
 
         $this->db->transaction();
+
         try {
             $this->db->table('account_deletion_requests')->insert([
                 'user_id'      => $uid,
@@ -346,17 +376,25 @@ class UserModel extends Model {
                 'completed_at' => $now_utc,
             ]);
 
-            // Explicit token cleanup (defense-in-depth alongside FK ON DELETE CASCADE)
-            $this->db->raw('DELETE FROM refresh_tokens WHERE user_id = ?', [$uid]);
-            $this->db->raw('DELETE FROM password_reset_tokens WHERE user_id = ?', [$uid]);
+            // Explicit token cleanup, alongside FK ON DELETE CASCADE.
+            $this->db->table('refresh_tokens')
+                ->where('user_id', $uid)
+                ->delete();
+
+            $this->db->table('password_reset_tokens')
+                ->where('user_id', $uid)
+                ->delete();
 
             // Cascades to runner_profiles, training_plans, training_sessions,
             // activities, plan_revisions, etc., and sets user_id = NULL on audit tables.
-            $this->db->raw('DELETE FROM users WHERE id = ?', [$uid]);
+            $this->db->table($this->table)
+                ->where('id', $uid)
+                ->delete();
 
             $this->db->commit();
+
             return true;
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             $this->db->roll_back();
             throw $e;
         }

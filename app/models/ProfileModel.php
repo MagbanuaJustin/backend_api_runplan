@@ -3,9 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Model: ProfileModel
- *
- * Runner training profile, required preferred workout time, optional desired
- * weekly run frequency, and optional training location.
+ * 
+ * Automatically generated via CLI.
  */
 class ProfileModel extends Model {
     protected $table = 'runner_profiles';

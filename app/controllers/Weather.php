@@ -3,20 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Controller: Weather
- *
- * Read-only advisory forecast for the next few days (`GET /api/weather/forecast`).
- *
- * Responsibilities, and nothing else:
- *   - check the request method and the JWT (the route also has `auth`)
- *   - rate limit, because a forecast can cost an outbound call
- *   - let the browser tell us "today" (it is the runner's date that matters),
- *     within one day of the server's date, exactly like Dashboard does
- *   - hand the reply straight through from WeatherModel
- *
- * All provider logic, caching and advisory wording live in WeatherModel and
- * OpenWeatherService; all SQL lives in the model. This controller never decides
- * anything about a training session, and there is no code path here that writes
- * to one (spec 5.2: weather is advisory).
+ * 
+ * Automatically generated via CLI.
  */
 class Weather extends Controller {
 

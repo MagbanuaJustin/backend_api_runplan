@@ -1,35 +1,10 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
-require_once dirname(__DIR__) . '/libraries/TokenVault.php';
-require_once dirname(__DIR__) . '/libraries/OAuthState.php';
-require_once dirname(__DIR__) . '/libraries/GoogleCalendarService.php';
-
 /**
  * Model: CalendarLinkModel
- *
- * Owns one row per runner in `integration_accounts` for provider
- * `google_calendar`: the sealed OAuth tokens, which calendar to write to, and
- * the last sync outcome (spec 5.3).
- *
- * Four decisions worth knowing:
- *
- *   1. Tokens are only ever written sealed. This model hands plaintext to
- *      TokenVault and stores whatever comes back; it has no code path that can
- *      put a refresh token in the column verbatim.
- *
- *   2. Six states, never an exception - `not_configured`, `unavailable`,
- *      `disconnected`, `connected`, `needs_reconnect`, plus the `sync_enabled`
- *      flag that can pause syncing without revoking access. Every caller can
- *      render one of these; none of them are errors (NFR-04).
- *
- *   3. Nothing here touches `training_sessions`. Connecting a calendar must not
- *      change a single workout, so the connection and the schedule stay in
- *      separate models.
- *
- *   4. `sync_enabled` pauses event creation while keeping the grant, which is
- *      what a runner means by "stop adding these to my calendar" as opposed to
- *      "forget me".
+ * 
+ * Automatically generated via CLI.
  */
 class CalendarLinkModel extends Model {
 

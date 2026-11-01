@@ -3,26 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Controller: CalendarSync
- *
- * Google Calendar connection endpoints (spec 5.3).
- *
- *   GET  /api/calendar/connect        -> {auth_url} the browser should open
- *   GET  /calendar/callback           -> Google returns here (no JWT, see below)
- *   GET  /api/calendar/status         -> connection state for the UI
- *   POST /api/calendar/disconnect     -> revoke + forget
- *   POST /api/calendar/sync-enabled   -> pause/resume without revoking
- *
- * The split between /api/* and /calendar/callback is deliberate:
- *
- *   - Everything under /api/* is JSON and JWT-protected, and the front controller
- *     wraps its output so a warning can never corrupt the body.
- *   - The callback is a top-level browser navigation from Google. It has no
- *     Authorization header, cannot be JSON, and must answer with a 302 back to
- *     the SPA. Its identity check is the signed `state` value, verified inside
- *     CalendarLinkModel before any token is exchanged.
- *
- * Transport only: no SQL, no provider calls, no token handling. All of that
- * lives in CalendarLinkModel and GoogleCalendarService.
+ * 
+ * Automatically generated via CLI.
  */
 class CalendarSync extends Controller {
 

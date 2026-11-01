@@ -3,11 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Controller: AiCoaching
- *
- * Exposes weekly training review endpoints (GET /api/ai/feedback and
- * POST /api/ai/feedback) and private, unsaved chat (POST /api/ai/chat).
- * Uses Groq when enabled and configured, with deterministic feedback
- * fallback when the provider is unavailable.
+ * 
+ * Automatically generated via CLI.
  */
 class AiCoaching extends Controller
 {

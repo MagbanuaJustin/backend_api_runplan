@@ -2,31 +2,9 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
- * HttpClient - the only outbound HTTP path in the application.
- *
- * Why this exists as its own class:
- *
- *   - Every provider call (Gemini, OpenWeatherMap, Google, FCM) needs the
- *     same boring guarantees: a hard timeout, a response size cap, JSON
- *     decoding that cannot emit notices, and one error shape. Doing that at
- *     each call site is how you end up with a provider outage taking the
- *     dashboard down with it.
- *   - It is the seam that makes the integrations testable. Tests call
- *     HttpClient::fake() and assert on what we WOULD have sent, so the
- *     privacy rules in the spec ("send only eligible first-party fields")
- *     become checkable rather than aspirational.
- *   - No new dependencies. This project has no composer autoloader and the
- *     framework is vendored, so Guzzle is not on the table.
- *
- * Failure contract: request() never throws and never returns a partial body.
- * It returns an array:
- *
- *   ok         bool    - transport succeeded AND status is 2xx
- *   status     int     - HTTP status, 0 when the request never completed
- *   data       ?array  - decoded JSON object/array, null if not JSON
- *   raw        string  - body text, truncated to max_bytes
- *   error      ?string - safe, human-oriented message (never contains a key)
- *   error_code ?string - machine tag for branching: timeout|dns|tls|transport|http|json
+ * Library: HttpClient
+ * 
+ * Automatically generated via CLI.
  */
 class HttpClient {
 

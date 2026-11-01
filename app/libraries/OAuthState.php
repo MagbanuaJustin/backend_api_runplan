@@ -2,28 +2,9 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
- * OAuthState - the signed `state` parameter of the Google OAuth redirect.
- *
- * The problem it solves:
- *
- *   The browser leaves our app, visits accounts.google.com, and comes back to a
- *   plain GET /calendar/callback?code=...&state=... That request carries no
- *   Authorization header, so it cannot be authenticated the usual way. Without a
- *   checked `state`, anyone could hand a logged-out or different browser a
- *   callback URL and have an attacker's Google account attached to whichever
- *   RunPlan user loaded it (CSRF on the link step).
- *
- * How it works:
- *
- *   state = v1.<user id>.<expiry unix>.<random nonce>.<hmac>
- *
- *   The HMAC covers every earlier field, so the user id cannot be swapped and
- *   the expiry cannot be extended. Verification is constant-time (hash_equals).
- *   The value is stateless on purpose: nothing to store, nothing to clean up,
- *   and a server restart cannot orphan a flow that is mid-consent.
- *
- *   Ten minutes is the lifetime - long enough for Google consent, short enough
- *   that a leaked URL dies quickly.
+ * Library: OAuthState
+ * 
+ * Automatically generated via CLI.
  */
 class OAuthState {
 

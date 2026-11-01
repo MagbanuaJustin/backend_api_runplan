@@ -3,9 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Model: SecurityEventModel
- *
- * Privacy-safe security audit log backed by `auth_security_events`.
- * Never stores raw tokens, passwords, or personal email addresses.
+ * 
+ * Automatically generated via CLI.
  */
 class SecurityEventModel extends Model {
 

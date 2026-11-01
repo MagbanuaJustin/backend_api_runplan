@@ -3,9 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Controller: Plans
- *
- * Plan generation, draft approval, two-step revision workflow
- * (`propose` -> `apply` / `reject`), and revision audit history.
+ * 
+ * Automatically generated via CLI.
  */
 class Plans extends Controller {
 

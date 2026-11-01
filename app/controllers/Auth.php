@@ -3,10 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Controller: Auth
- *
- * Core first-party email/password authentication, Google sign-in, password
- * recovery, and rotating HttpOnly refresh sessions. Persistence and
- * validation rules live in Models.
+ * 
+ * Automatically generated via CLI.
  */
 class Auth extends Controller
 {

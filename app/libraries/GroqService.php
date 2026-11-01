@@ -1,11 +1,10 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
-require_once __DIR__ . '/HttpClient.php';
-
 /**
- * Server-side Groq chat-completions client. Sends only allowlisted metrics;
- * the API key stays on the server and failures use the deterministic fallback.
+ * Library: GroqService
+ * 
+ * Automatically generated via CLI.
  */
 class GroqService
 {

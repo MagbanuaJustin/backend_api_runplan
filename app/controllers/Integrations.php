@@ -3,10 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Controller: Integrations
- *
- * Read-only operational status for configured providers, plus this runner's
- * Google Calendar connection state. Credentials and token contents are never
- * included. Core planner features remain usable when providers are off.
+ * 
+ * Automatically generated via CLI.
  */
 class Integrations extends Controller {
 

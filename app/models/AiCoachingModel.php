@@ -1,17 +1,10 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
-require_once dirname(__DIR__) . '/libraries/GroqService.php';
-
 /**
  * Model: AiCoachingModel
- *
- * Persists AI / rule-based weekly coaching feedback (`ai_feedback`) and plan
- * generation audit rows (`ai_plan_requests`), enforcing:
- *   1. Strict `source = 'manual'` first-party data boundary (never non-manual runs).
- *   2. Monthly outbound Groq call ceiling (`GROQ_MONTHLY_CALL_CAP`).
- *   3. Automatic deterministic coaching fallback when Groq is disabled,
- *      over cap, or unreachable (Spec 5.1 & 7.3 / NFR-04).
+ * 
+ * Automatically generated via CLI.
  */
 class AiCoachingModel extends Model {
 

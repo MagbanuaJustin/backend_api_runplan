@@ -3,10 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Controller: CalendarEvents
- *
- * POST /api/calendar/sync runs an idempotent sync of upcoming planned sessions.
- * The controller handles HTTP/auth only; all SQL and Google calls stay in
- * CalendarSyncModel and its provider service.
+ * 
+ * Automatically generated via CLI.
  */
 class CalendarEvents extends Controller {
 

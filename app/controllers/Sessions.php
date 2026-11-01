@@ -3,9 +3,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Controller: Sessions
- *
- * Updates a training session on the runner's active plan (either moving its
- * date or toggling `planned` / `skipped` status with an optional `skip_reason`).
+ * 
+ * Automatically generated via CLI.
  */
 class Sessions extends Controller {
 

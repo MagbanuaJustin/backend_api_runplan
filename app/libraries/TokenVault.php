@@ -2,33 +2,9 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
- * TokenVault - encrypts OAuth credentials before they reach the database.
- *
- * Why this exists at all:
- *
- *   A Google refresh token is a long-lived password to a runner's calendar.
- *   Storing it as plain text means one database dump, one SQL injection, or one
- *   copied backup hands over a runner's calendar for as long as Google keeps the
- *   grant. `integration_accounts.encrypted_tokens` therefore only ever holds a
- *   sealed envelope, and the key (GCAL_TOKEN_AAD) lives in .env, never in the
- *   database and never in the repository.
- *
- * What it is:
- *
- *   AES-256-GCM via openssl, with a fresh 12-byte IV per seal and the 16-byte
- *   authentication tag stored next to the ciphertext. GCM is authenticated
- *   encryption, so a modified or truncated value fails to open instead of
- *   returning garbage tokens. Each envelope also carries a version byte so the
- *   format can change later without guessing what is in the column.
- *
- * Contract, deliberately boring:
- *
- *   - seal() returns a string, or null when no usable key is configured.
- *   - open() returns an array, or null for ANY failure (no key, bad base64,
- *     tampered ciphertext, wrong key, non-JSON payload).
- *   - Neither method ever throws. A calendar integration that cannot read its
- *     tokens must degrade to "reconnect required", not fatal-error the app
- *     (NFR-04).
+ * Library: TokenVault
+ * 
+ * Automatically generated via CLI.
  */
 class TokenVault {
 

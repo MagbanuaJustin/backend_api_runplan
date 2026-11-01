@@ -2,13 +2,10 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
- * Integration helper
- *
- * Shared read-side API for app/config/integrations.php.
- * Missing provider configuration is treated as not ready so optional
- * integrations do not prevent the core planner from working.
+ * Helper: integration_helper.php
+ * 
+ * Automatically generated via CLI.
  */
-
 if (!function_exists('integration_config')) {
     /**
      * Return the full integrations config, or one provider's config.
