@@ -33,7 +33,7 @@ class CalendarSyncModel extends Model
         $uid    = (int) $user_id;
         $oauth  = $oauth ?: new GoogleCalendarService();
         $events = $events ?: new GoogleCalendarEventService();
-        $vault  = $vault ?: new TokenVault();
+        $vault  = $vault ?: new TokenVault((string) integration_value('google_calendar', 'token_aad', ''));
         $now    = $now ?: new DateTimeImmutable('now', new DateTimeZone('UTC'));
         $links  = new CalendarLinkModel();
 

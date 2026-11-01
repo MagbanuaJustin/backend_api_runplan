@@ -58,7 +58,7 @@ class CalendarLinkModel extends Model {
     {
         $uid   = (int) $user_id;
         $ready = $provider_ready === null ? integration_ready(self::PROVIDER) : (bool) $provider_ready;
-        $vault = $vault ?: new TokenVault();
+        $vault = $vault ?: new TokenVault((string) integration_value('google_calendar', 'token_aad', ''));
 
         $blank = [
             'provider'         => self::PROVIDER,
@@ -148,7 +148,7 @@ class CalendarLinkModel extends Model {
      */
     public function tokens_for_user($user_id, ?TokenVault $vault = null)
     {
-        $vault = $vault ?: new TokenVault();
+        $vault = $vault ?: new TokenVault((string) integration_value('google_calendar', 'token_aad', ''));
         if (!$vault->is_ready()) {
             return null;
         }
@@ -178,7 +178,7 @@ class CalendarLinkModel extends Model {
     public function save_tokens($user_id, array $tokens, $scopes = null, ?TokenVault $vault = null)
     {
         $uid   = (int) $user_id;
-        $vault = $vault ?: new TokenVault();
+        $vault = $vault ?: new TokenVault((string) integration_value('google_calendar', 'token_aad', ''));
 
         if ($uid <= 0) {
             return false;
@@ -348,7 +348,7 @@ class CalendarLinkModel extends Model {
     {
         $uid     = (int) $user_id;
         $service = $service ?: new GoogleCalendarService();
-        $guard   = $state_guard ?: new OAuthState();
+        $guard   = $state_guard ?: new OAuthState((string) integration_value('google_calendar', 'token_aad', ''));
 
         $status = $this->status_for_user($uid, $service->is_ready(), $vault);
 
@@ -393,7 +393,7 @@ class CalendarLinkModel extends Model {
     public function finish_connection($state_value, $code, ?GoogleCalendarService $service = null, ?OAuthState $state_guard = null, ?TokenVault $vault = null)
     {
         $service = $service ?: new GoogleCalendarService();
-        $guard   = $state_guard ?: new OAuthState();
+        $guard   = $state_guard ?: new OAuthState((string) integration_value('google_calendar', 'token_aad', ''));
 
         if (!$service->is_ready()) {
             return $this->outcome(false, null, 'not_configured',
