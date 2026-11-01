@@ -1,30 +1,10 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
-require_once __DIR__ . '/HttpClient.php';
-
 /**
- * OpenWeatherService - advisory weather for a runner's location (spec 5.2).
- *
- * Built strictly atop `HttpClient`, like `AnthropicService`, so it inherits the
- * one outbound path with a hard timeout, a size cap and a single error shape.
- *
- * Three rules this class exists to keep:
- *
- *   1. Never throws. Every method returns `ok => false` with a machine readable
- *      `error_code` (not_configured, no_location, unauthorized, unavailable,
- *      no_match) so the model can degrade instead of failing the dashboard.
- *   2. Never invents a forecast. If the provider has no data for a date, that
- *      date is simply absent - the UI says "no forecast that far out" rather
- *      than guessing (the config publishes the horizon for exactly this).
- *   3. Weather is advisory only. This class returns notes; it never decides
- *      that a session should move, shrink or be skipped. That stays with the
- *      deterministic planner and the runner.
- *
- * Provider calls used:
- *   GEOCoding  GET /geo/1.0/direct?q=...        place name -> lat/lon
- *   forecast16 GET /data/2.5/forecast?lat&lon   5 days, 3-hourly (free tier)
- *   onecall    GET /data/3.0/onecall?lat&lon    daily, up to 8 days (paid)
+ * Library: OpenWeatherService
+ * 
+ * Automatically generated via CLI.
  */
 class OpenWeatherService {
 

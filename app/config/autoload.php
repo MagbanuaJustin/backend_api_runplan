@@ -72,7 +72,16 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 |
 |	$autoload['libraries'] = array('database', 'email', 'session');
 */
-$autoload['libraries'] = array();
+$autoload['libraries'] = array(
+    'HttpClient',
+    'TokenVault',
+    'OAuthState',
+    'GoogleCalendarService',
+    'GoogleCalendarEventService',
+    'AnthropicService',
+    'WebPushService',
+    'OpenWeatherService',
+);
 
 /*
 | -------------------------------------------------------------------
@@ -92,7 +101,7 @@ $autoload['helpers'] = array('integration');
 |
 |	$autoload['models'] = array('model1_model', 'model2_model')
 */
-$autoload['models'] = array();
+$autoload['models'] = array('CalendarLinkModel');
 
 /*
 | -------------------------------------------------------------------

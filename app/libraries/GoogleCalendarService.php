@@ -1,34 +1,10 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
-require_once __DIR__ . '/HttpClient.php';
-
 /**
- * GoogleCalendarService - the three OAuth calls Google Calendar needs.
- *
- * A runner's calendar is reached with an OAuth 2.0 authorisation-code flow:
- *
- *   1. authorize_url()    - send the browser to Google's consent screen.
- *   2. exchange_code()    - turn the one-time ?code= into access + refresh tokens.
- *   3. refresh()          - swap the refresh token for a new access token later.
- *                           (access tokens last an hour; refresh tokens do not
- *                           expire while the grant stands)
- *   4. revoke()           - give the grant back when the runner disconnects.
- *
- * Three rules this class follows, because integrations are optional:
- *
- *   - is_ready() is false when the feature is off or a key is missing. Callers
- *     then show a sentence; nothing throws (NFR-04).
- *   - It never returns Google's raw error text to a client. `error` is our own
- *     wording and `error_code` is a small enum, so a provider message cannot
- *     echo a fragment of a credential into an API response.
- *   - All network traffic goes through HttpClient, which means tests can fake
- *     it and the privacy test can assert exactly what was sent.
- *
- * `access_type=offline` plus `prompt=consent` are deliberate: Google only issues
- * a refresh token on the first consent unless consent is forced, and a reconnect
- * that silently loses the refresh token would leave a runner with a connection
- * that dies an hour later.
+ * Library: GoogleCalendarService
+ * 
+ * Automatically generated via CLI.
  */
 class GoogleCalendarService {
 

@@ -1,14 +1,10 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
-require_once __DIR__ . '/HttpClient.php';
-
 /**
- * GoogleCalendarEventService - create or update an event through Calendar API v3.
- *
- * OAuth/token exchange is kept in GoogleCalendarService. This class receives an
- * already-valid access token and only speaks to the events endpoint. Every call
- * uses HttpClient so the API can be tested without a Google account or network.
+ * Library: GoogleCalendarEventService
+ * 
+ * Automatically generated via CLI.
  */
 class GoogleCalendarEventService {
 
