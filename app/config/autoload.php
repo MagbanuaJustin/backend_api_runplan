@@ -80,6 +80,7 @@ $autoload['libraries'] = array(
     'GoogleCalendarEventService',
     'WebPushService',
     'OpenWeatherService',
+    'GroqService',
 );
 
 /*
