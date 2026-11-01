@@ -364,6 +364,17 @@ class Invoker {
     {
         $autoload = autoload_config();
 
+		// Configs and helpers load FIRST: autoloaded libraries (e.g.
+		// GoogleCalendarEventService, WebPushService) call integration_config()
+		// in their constructors, which needs both the helper and the config.
+		if(count($autoload['configs']) > 0)
+        {
+            lava_instance()->config->load($autoload['configs']);
+        }
+		if(count($autoload['helpers']) > 0)
+        {
+            $this->helper($autoload['helpers']);
+        }
 		if(count($autoload['libraries']) > 0)
         {
             $this->library($autoload['libraries']);
@@ -371,14 +382,6 @@ class Invoker {
 		if(count($autoload['models']) > 0)
         {
             $this->model($autoload['models']);
-        }
-		if(count($autoload['helpers']) > 0)
-        {
-            $this->helper($autoload['helpers']);
-        }
-		if(count($autoload['configs']) > 0)
-        {
-            lava_instance()->config->load($autoload['configs']);
         }
     }
 }

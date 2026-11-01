@@ -78,7 +78,6 @@ $autoload['libraries'] = array(
     'OAuthState',
     'GoogleCalendarService',
     'GoogleCalendarEventService',
-    'AnthropicService',
     'WebPushService',
     'OpenWeatherService',
 );
