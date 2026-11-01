@@ -6,7 +6,7 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
  * 
  * Automatically generated via CLI.
  */
-class UserModel extends Model
+class WeatherModel extends Model
 {
     protected $table = 'weather_cache';
     protected $primary_key = 'id';
