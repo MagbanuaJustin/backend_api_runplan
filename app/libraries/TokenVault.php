@@ -34,9 +34,7 @@ class TokenVault {
      */
     public function __construct($key_hex = null)
     {
-        $hex = $key_hex === null
-            ? (string) integration_value('google_calendar', 'token_aad', '')
-            : (string) $key_hex;
+        $hex = $key_hex === null ? '' : (string) $key_hex;
         $hex = trim($hex);
 
         $this->key = (strlen($hex) === self::KEY_BYTES * 2 && ctype_xdigit($hex) && self::crypto_available())

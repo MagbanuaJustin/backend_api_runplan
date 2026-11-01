@@ -23,11 +23,9 @@ class OAuthState {
      *                           before use, so the same secret can safely sign
      *                           two different things.
      */
-    public function __construct($secret = null)
+     public function __construct($secret = null)
     {
-        $value = $secret === null
-            ? (string) integration_value('google_calendar', 'token_aad', '')
-            : (string) $secret;
+        $value = $secret === null ? '' : (string) $secret;
         $value = trim($value);
 
         $this->key = $value === '' ? null : hash('sha256', 'runplan.oauth.state|' . $value, true);
