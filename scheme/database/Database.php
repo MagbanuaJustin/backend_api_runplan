@@ -888,10 +888,43 @@ class Database {
      */
     public function where_null($where)
     {
-        $where = $where . ' IS NULL';
+        return $this->null_condition($where, 'AND', false);
+    }
+
+    /**
+     * or_where_null
+     *
+     * @param  string $where
+     * @return object
+     */
+    public function or_where_null($where)
+    {
+        return $this->null_condition($where, 'OR', false);
+    }
+
+    /**
+     * Shared builder for IS NULL / IS NOT NULL conditions. Honours the
+     * grouped() flag so the opening bracket is emitted when a group starts
+     * with a null check (where() already does this).
+     *
+     * @param  string $column
+     * @param  string $andOr
+     * @param  bool   $not
+     * @return object
+     */
+    private function null_condition($column, $andOr = 'AND', $not = false)
+    {
+        $this->validate_identifier($column);
+        $where = $column . ($not ? ' IS NOT NULL' : ' IS NULL');
+
+        if ($this->grouped) {
+            $where = '(' . $where;
+            $this->grouped = false;
+        }
+
         $this->where = (is_null($this->where))
             ? ' WHERE ' . $where
-            : $this->where . ' ' . 'AND ' . $where;
+            : $this->where . ' ' . $andOr . ' ' . $where;
 
         return $this;
     }
@@ -904,12 +937,7 @@ class Database {
      */
     public function where_not_null($where)
     {
-        $where = $where . ' IS NOT NULL';
-        $this->where = (is_null($this->where))
-            ? ' WHERE ' . $where
-            : $this->where . ' ' . 'AND ' . $where;
-
-        return $this;
+        return $this->null_condition($where, 'AND', true);
     }
 
     /**
@@ -1361,6 +1389,30 @@ class Database {
                 $e
             );
         }
+    }
+
+    /**
+     * row_array - first matching row as an associative array, or false.
+     * Alias of get(); the app's models were written against this name.
+     *
+     * @return array|false
+     */
+    public function row_array()
+    {
+        return $this->get(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * result_array - all matching rows as associative arrays (empty array
+     * when nothing matches). Alias of get_all().
+     *
+     * @return array
+     */
+    public function result_array()
+    {
+        $rows = $this->get_all(PDO::FETCH_ASSOC);
+
+        return is_array($rows) ? $rows : [];
     }
 
     /**
