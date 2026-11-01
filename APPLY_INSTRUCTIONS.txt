@@ -1,0 +1,14 @@
+RunPlan Lavalust API — fixed source overlay
+
+Apply
+1. Back up your existing API folder.
+2. Extract this ZIP over the existing API source.
+3. Keep your current .env and vendor directory; neither is included in this ZIP.
+4. Review .env.example for the expected variable names. For reCAPTCHA, configure a matching score-based v3 site key and secret, set RECAPTCHA_SECRET_KEY and RECAPTCHA_ALLOWED_HOSTNAMES, and use RECAPTCHA_VERSION=v3. Do not paste secret values into chat or commit them.
+5. Google OAuth credentials must remain private and match the frontend client ID and configured redirect URI.
+
+Migration note
+The migration endpoint remains in the routes for the documented CLI workflow. The controller rejects web requests, and migrations are disabled by default. Use the project’s documented CLI migration command only when you intend to apply database changes.
+
+Security note
+The uploaded archive contained local secret/configuration artifacts. This source ZIP omits .env, Google client-secret JSON, .git, vendor, and runtime/cache. If the original archive was shared beyond your private machine, rotate its OAuth, reCAPTCHA, and signing secrets.
