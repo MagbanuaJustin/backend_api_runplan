@@ -3,48 +3,94 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Library: GoogleCalendarService
- * 
- * Automatically generated via CLI.
+ *
+ * Handles Google Calendar OAuth and token requests.
  */
-class GoogleCalendarService {
-
+class GoogleCalendarService
+{
     const AUTH_URI   = 'https://accounts.google.com/o/oauth2/v2/auth';
     const TOKEN_URI  = 'https://oauth2.googleapis.com/token';
     const REVOKE_URI = 'https://oauth2.googleapis.com/revoke';
 
-    /** @var array provider config block */
+    /** @var array|null */
     private $config;
 
     /** @var HttpClient */
     private $http;
 
     /**
-     * @param array|null      $config overrides the integrations.php block (used by tests)
-     * @param HttpClient|null $http
+     * @param array|null      $config Optional configuration override, used by tests.
+     * @param HttpClient|null $http   Optional HTTP client.
      */
     public function __construct(?array $config = null, ?HttpClient $http = null)
     {
-        $this->config = $config === null ? integration_config('google_calendar') : $config;
-
-        $timeout    = (int) ($this->config['timeout'] ?? 15);
-        $this->http = $http ?: new HttpClient($timeout > 0 ? $timeout : 15);
+        // Do not call integration_config() here. This library may be instantiated
+        // during unrelated requests, including authentication requests.
+        $this->config = $config;
+        $this->http = $http ?: new HttpClient(15);
     }
 
     /**
-     * Enabled AND configured: a consent screen is only offered when we can
-     * actually finish the exchange.
+     * Get the Google Calendar config only when this service needs it.
+     *
+     * If the helper is unavailable, return an empty config rather than causing
+     * unrelated requests to fail with an undefined-function fatal error.
+     *
+     * @return array
+     */
+    private function provider_config()
+    {
+        if (is_array($this->config)) {
+            return $this->config;
+        }
+
+        if (!function_exists('integration_config')) {
+            return array();
+        }
+
+        $config = integration_config('google_calendar');
+
+        if (!is_array($config)) {
+            return array();
+        }
+
+        $this->config = $config;
+        return $this->config;
+    }
+
+    /**
+     * Return a usable timeout value.
+     *
+     * @return int
+     */
+    private function timeout()
+    {
+        $config = $this->provider_config();
+        $timeout = (int) ($config['timeout'] ?? 15);
+
+        return $timeout > 0 ? $timeout : 15;
+    }
+
+    /**
+     * Whether Google Calendar is enabled and has all required credentials.
      *
      * @return bool
      */
     public function is_ready()
     {
-        $enabled = filter_var($this->config['enabled'] ?? false, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        $config = $this->provider_config();
+        $enabled = filter_var(
+            $config['enabled'] ?? false,
+            FILTER_VALIDATE_BOOLEAN,
+            FILTER_NULL_ON_FAILURE
+        );
+
         if ($enabled !== true) {
             return false;
         }
 
         foreach (array('client_id', 'client_secret', 'redirect_uri') as $key) {
-            if (trim((string) ($this->config[$key] ?? '')) === '') {
+            if (trim((string) ($config[$key] ?? '')) === '') {
                 return false;
             }
         }
@@ -53,11 +99,15 @@ class GoogleCalendarService {
     }
 
     /**
-     * @return array narrowest scopes that can create and update the runner's events
+     * Get the configured calendar scopes.
+     *
+     * @return array
      */
     public function scopes()
     {
-        $scopes = $this->config['scopes'] ?? array();
+        $config = $this->provider_config();
+        $scopes = $config['scopes'] ?? array();
+
         if (!is_array($scopes) || !$scopes) {
             $scopes = array('https://www.googleapis.com/auth/calendar.events');
         }
@@ -66,91 +116,136 @@ class GoogleCalendarService {
     }
 
     /**
-     * @return int default event length in minutes
+     * Get the configured event length.
+     *
+     * @return int
      */
     public function event_minutes()
     {
-        $minutes = (int) ($this->config['event_length_minutes'] ?? 60);
+        $config = $this->provider_config();
+        $minutes = (int) ($config['event_length_minutes'] ?? 60);
+
         return $minutes > 0 ? $minutes : 60;
     }
 
     /**
-     * The consent-screen URL the browser is sent to.
+     * Build the Google OAuth authorization URL.
      *
-     * @param string $state value from OAuthState::issue()
+     * Returns an empty string if the required settings are not available.
+     *
+     * @param string $state
      * @return string
      */
     public function authorize_url($state)
     {
+        $config = $this->provider_config();
+
+        $clientId = trim((string) ($config['client_id'] ?? ''));
+        $redirectUri = trim((string) ($config['redirect_uri'] ?? ''));
+
+        if ($clientId === '' || $redirectUri === '') {
+            return '';
+        }
+
         $params = array(
-            'client_id'             => (string) $this->config['client_id'],
-            'redirect_uri'          => (string) $this->config['redirect_uri'],
-            'response_type'         => 'code',
-            'scope'                 => implode(' ', $this->scopes()),
-            'access_type'           => 'offline',
-            'prompt'                => 'consent',
+            'client_id'              => $clientId,
+            'redirect_uri'           => $redirectUri,
+            'response_type'          => 'code',
+            'scope'                  => implode(' ', $this->scopes()),
+            'access_type'            => 'offline',
+            'prompt'                 => 'consent',
             'include_granted_scopes' => 'true',
-            'state'                 => (string) $state,
+            'state'                  => (string) $state,
         );
 
-        return self::AUTH_URI . '?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+        return self::AUTH_URI . '?' . http_build_query(
+            $params,
+            '',
+            '&',
+            PHP_QUERY_RFC3986
+        );
     }
 
     /**
-     * Turn the callback's one-time code into tokens.
+     * Exchange an authorization code for OAuth tokens.
      *
      * @param string $code
-     * @return array {ok, tokens?, error?, error_code?}
+     * @return array
      */
     public function exchange_code($code)
     {
         $code = trim((string) $code);
+
         if ($code === '') {
-            return $this->failure('denied', 'The Google consent screen was closed before access was granted.');
+            return $this->failure(
+                'denied',
+                'The Google consent screen was closed before access was granted.'
+            );
         }
+
+        if (!$this->is_ready()) {
+            return $this->failure(
+                'unavailable',
+                'Google Calendar is not configured.'
+            );
+        }
+
+        $config = $this->provider_config();
 
         return $this->token_request(array(
             'code'          => $code,
-            'client_id'     => (string) $this->config['client_id'],
-            'client_secret' => (string) $this->config['client_secret'],
-            'redirect_uri'  => (string) $this->config['redirect_uri'],
+            'client_id'     => (string) $config['client_id'],
+            'client_secret' => (string) $config['client_secret'],
+            'redirect_uri'  => (string) $config['redirect_uri'],
             'grant_type'    => 'authorization_code',
         ));
     }
 
     /**
-     * Get a fresh access token from a stored refresh token.
+     * Refresh an existing Google OAuth token.
      *
      * @param string $refresh_token
-     * @param array  $previous existing token set, so a reply without a new
-     *                         refresh_token keeps the old one
-     * @return array {ok, tokens?, error?, error_code?}
+     * @param array  $previous
+     * @return array
      */
     public function refresh($refresh_token, array $previous = array())
     {
         $token = trim((string) $refresh_token);
+
         if ($token === '') {
-            return $this->failure('revoked', 'This Google connection no longer has a refresh token.');
+            return $this->failure(
+                'revoked',
+                'This Google connection no longer has a refresh token.'
+            );
         }
+
+        if (!$this->is_ready()) {
+            return $this->failure(
+                'unavailable',
+                'Google Calendar is not configured.'
+            );
+        }
+
+        $config = $this->provider_config();
 
         return $this->token_request(array(
             'refresh_token' => $token,
-            'client_id'     => (string) $this->config['client_id'],
-            'client_secret' => (string) $this->config['client_secret'],
+            'client_id'     => (string) $config['client_id'],
+            'client_secret' => (string) $config['client_secret'],
             'grant_type'    => 'refresh_token',
         ), $previous);
     }
 
     /**
-     * Give the grant back. Best effort: a disconnect must succeed locally even
-     * when Google is unreachable.
+     * Revoke a Google OAuth token.
      *
-     * @param string $token refresh token ideally, access token also accepted
+     * @param string $token
      * @return bool
      */
     public function revoke($token)
     {
         $token = trim((string) $token);
+
         if ($token === '') {
             return true;
         }
@@ -159,20 +254,20 @@ class GoogleCalendarService {
             self::REVOKE_URI . '?token=' . rawurlencode($token),
             array(
                 'method'  => 'POST',
-                'headers' => array('Content-Type: application/x-www-form-urlencoded'),
+                'headers' => array(
+                    'Content-Type: application/x-www-form-urlencoded',
+                ),
                 'body'    => '',
-                'timeout' => (int) ($this->config['timeout'] ?? 15),
+                'timeout' => $this->timeout(),
             )
         );
 
-        return (bool) $res['ok'];
+        return (bool) ($res['ok'] ?? false);
     }
 
-    // ------------------------------------------------------------------
-    // Internals
-    // ------------------------------------------------------------------
-
     /**
+     * Send an OAuth token request to Google.
+     *
      * @param array $form
      * @param array $previous
      * @return array
@@ -186,44 +281,54 @@ class GoogleCalendarService {
                 'Accept: application/json',
             ),
             'body'    => http_build_query($form, '', '&'),
-            'timeout' => (int) ($this->config['timeout'] ?? 15),
+            'timeout' => $this->timeout(),
         ));
 
         $data = is_array($res['data'] ?? null) ? $res['data'] : array();
 
-        if (!$res['ok']) {
+        if (empty($res['ok'])) {
+            $errorCode = $this->map_error($res, $data);
+
             return $this->failure(
-                $this->map_error($res, $data),
-                $this->message_for($this->map_error($res, $data))
+                $errorCode,
+                $this->message_for($errorCode)
             );
         }
 
         if (empty($data['access_token'])) {
-            return $this->failure('unavailable', 'Google did not return an access token.');
+            return $this->failure(
+                'unavailable',
+                'Google did not return an access token.'
+            );
         }
 
-        return array('ok' => true, 'tokens' => $this->normalise($data, $previous));
+        return array(
+            'ok'     => true,
+            'tokens' => $this->normalise($data, $previous),
+        );
     }
 
     /**
-     * @param array $res   HttpClient result
-     * @param array $data  decoded body
-     * @return string revoked|unauthorized|rate_limited|unavailable
+     * Map Google or transport errors to app error codes.
+     *
+     * @param array $res
+     * @param array $data
+     * @return string
      */
     private function map_error(array $res, array $data)
     {
-        $google_error = strtolower((string) ($data['error'] ?? ''));
+        $status = (int) ($res['status'] ?? $res['http_status'] ?? 0);
+        $providerError = strtolower((string) ($data['error'] ?? ''));
 
-        if ($google_error === 'invalid_grant' || $google_error === 'invalid_request') {
+        if ($providerError === 'invalid_grant' || $providerError === 'invalid_request') {
             return 'revoked';
         }
-        if ($google_error === 'invalid_client' || $google_error === 'unauthorized_client') {
+
+        if ($providerError === 'invalid_client' || $status === 401 || $status === 403) {
             return 'unauthorized';
         }
-        if ((int) $res['status'] === 401 || (int) $res['status'] === 403) {
-            return 'unauthorized';
-        }
-        if ((int) $res['status'] === 429) {
+
+        if ($status === 429) {
             return 'rate_limited';
         }
 
@@ -231,35 +336,46 @@ class GoogleCalendarService {
     }
 
     /**
+     * Convert an error code into a user-facing message.
+     *
      * @param string $code
-     * @return string safe, human wording - never Google's raw text
+     * @return string
      */
     private function message_for($code)
     {
-        switch ($code) {
+        switch ((string) $code) {
             case 'revoked':
-                return 'Google says this authorisation is no longer valid. Reconnect Google Calendar.';
+                return 'The Google Calendar connection has expired. Please reconnect it.';
+
             case 'unauthorized':
-                return 'Google rejected the OAuth client credentials. Check GCAL_CLIENT_ID and GCAL_CLIENT_SECRET.';
+                return 'Google rejected the Calendar credentials. Please reconnect the integration.';
+
             case 'rate_limited':
-                return 'Google is rate limiting us. Try again in a minute.';
+                return 'Google Calendar is temporarily rate limited. Please try again later.';
+
             default:
-                return 'Google Calendar could not be reached. Try again shortly.';
+                return 'Google Calendar is temporarily unavailable. Please try again later.';
         }
     }
 
     /**
+     * Return a normalized failure response.
+     *
      * @param string $code
      * @param string $message
      * @return array
      */
     private function failure($code, $message)
     {
-        return array('ok' => false, 'error_code' => $code, 'error' => $message);
+        return array(
+            'ok'         => false,
+            'error_code' => (string) $code,
+            'error'      => (string) $message,
+        );
     }
 
     /**
-     * Flatten Google's token reply into the small set of fields we store.
+     * Normalize Google's OAuth token response.
      *
      * @param array $data
      * @param array $previous
@@ -267,25 +383,22 @@ class GoogleCalendarService {
      */
     private function normalise(array $data, array $previous = array())
     {
-        $expires_in = (int) ($data['expires_in'] ?? 0);
+        $expiresIn = max(0, (int) ($data['expires_in'] ?? 0));
 
-        $tokens = array(
-            'access_token' => (string) $data['access_token'],
-            'expires_at'   => time() + max(0, $expires_in),
-            'token_type'   => (string) ($data['token_type'] ?? 'Bearer'),
+        return array(
+            'access_token'  => (string) $data['access_token'],
+            'expires_at'    => gmdate('Y-m-d H:i:s', time() + $expiresIn),
+            'token_type'    => (string) ($data['token_type'] ?? 'Bearer'),
+            'refresh_token' => (string) (
+                $data['refresh_token']
+                ?? $previous['refresh_token']
+                ?? ''
+            ),
+            'scope'         => (string) (
+                $data['scope']
+                ?? $previous['scope']
+                ?? implode(' ', $this->scopes())
+            ),
         );
-
-        // A refresh reply usually omits refresh_token: keep the stored one.
-        $refresh = (string) ($data['refresh_token'] ?? ($previous['refresh_token'] ?? ''));
-        if ($refresh !== '') {
-            $tokens['refresh_token'] = $refresh;
-        }
-
-        $scope = (string) ($data['scope'] ?? ($previous['scope'] ?? ''));
-        if ($scope !== '') {
-            $tokens['scope'] = $scope;
-        }
-
-        return $tokens;
     }
 }
