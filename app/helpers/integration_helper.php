@@ -193,11 +193,6 @@ if (!function_exists('integration_public_config')) {
                 'assessment_api' => 'Google Cloud Fraud Defense',
                 'required_on' => integration_value('recaptcha', 'require_on', array()),
             ),
-            'strava' => array(
-                'ready' => false,
-                'configured' => false,
-                'reason' => 'Disabled pending review of the current Strava API Agreement and Policy.',
-            ),
         );
     }
 }
