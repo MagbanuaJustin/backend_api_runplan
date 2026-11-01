@@ -39,24 +39,23 @@ class GoogleCalendarService
      * @return array
      */
     private function provider_config()
-    {
-        if (is_array($this->config)) {
-            return $this->config;
-        }
-
-        if (!function_exists('integration_config')) {
-            return array();
-        }
-
-        $config = integration_config('google_calendar');
-
-        if (!is_array($config)) {
-            return array();
-        }
-
-        $this->config = $config;
+{
+    if (is_array($this->config)) {
         return $this->config;
     }
+
+    $integrations = function_exists('config_item')
+        ? config_item('integrations')
+        : null;
+
+    $config = is_array($integrations)
+        ? ($integrations['google_calendar'] ?? [])
+        : [];
+
+    $this->config = is_array($config) ? $config : [];
+
+    return $this->config;
+}
 
     /**
      * Return a usable timeout value.
