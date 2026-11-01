@@ -155,24 +155,51 @@ if (!function_exists('rp_send_api_json_error')) {
 }
 
 if (!function_exists('_exception_handler')) {
-    function _exception_handler($e) {
-        if (function_exists('config_item') && (config_item('log_threshold') == 1 || config_item('log_threshold') == 3)) {
+    function _exception_handler($e)
+    {
+        error_log(
+            '[RunPlan exception] ' . get_class($e) . ': ' .
+            $e->getMessage() . ' at ' .
+            basename($e->getFile()) . ':' . $e->getLine()
+        );
+
+        if (
+            function_exists('config_item')
+            && (config_item('log_threshold') == 1 || config_item('log_threshold') == 3)
+        ) {
             $logger = load_class('logger', 'kernel');
-            $logger->log('error', get_class($e), $e->getMessage(), $e->getFile(), $e->getLine());
+            $logger->log(
+                'error',
+                get_class($e),
+                $e->getMessage(),
+                $e->getFile(),
+                $e->getLine()
+            );
         }
+
         if (rp_is_api_request()) {
-            $detail = get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
-            rp_send_api_json_error(500, 'Internal server error. Please try again.', $detail);
+            $detail = get_class($e) . ': ' . $e->getMessage()
+                . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
+
+            rp_send_api_json_error(
+                500,
+                'Internal server error. Please try again.',
+                $detail
+            );
         }
-        if (function_exists('config_item') && strtolower((string) config_item('ENVIRONMENT')) === 'development') {
+
+        if (
+            function_exists('config_item')
+            && strtolower((string) config_item('ENVIRONMENT')) === 'development'
+        ) {
             $exception = load_class('Errors', 'kernel');
             $exception->show_exception($e);
         }
+
         http_response_code(500);
         exit;
     }
 }
-
 if (!function_exists('_error_handler')) {
     function _error_handler($severity, $errstr, $errfile, $errline) {
         // Respect @ suppression and ignore non-fatal deprecation notices (e.g. PHP 8.5)
