@@ -54,9 +54,9 @@ class RefreshTokenModel extends Model
      */
     public function find_valid($token)
     {
-        $token = (string) $token;
+         $token = (string) $token;
 
-        if ($token === '' || strlen($token) > 256) {
+        if ($token === '' || strlen($token) > 4096) {
             return null;
         }
 
@@ -82,7 +82,7 @@ class RefreshTokenModel extends Model
     {
         $token = (string) $token;
 
-        if ($token === '' || strlen($token) > 256) {
+        if ($token === '' || strlen($token) > 4096) {
             return;
         }
 
