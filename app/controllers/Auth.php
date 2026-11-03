@@ -489,19 +489,7 @@ class Auth extends Controller
         $this->api->require_method('POST');
         $this->api->rate_limit('refresh_' . ($_SERVER['REMOTE_ADDR'] ?? 'x'), 30, 600);
 
-        error_log(
-            '[RunPlan Refresh Debug] HTTP_COOKIE=' .
-            (isset($_SERVER['HTTP_COOKIE']) ? 'present' : 'missing') .
-            ' | PHP_COOKIE=' .
-            (isset($_COOKIE['rp_refresh']) ? 'present' : 'missing') .
-            ' | HEADER_HAS_REFRESH=' .
-            (
-                isset($_SERVER['HTTP_COOKIE']) &&
-                strpos($_SERVER['HTTP_COOKIE'], 'rp_refresh=') !== false
-                    ? 'yes'
-                    : 'no'
-            )
-        );
+        
         $token = (string) ($_COOKIE['rp_refresh'] ?? '');
         if ($token === '') {
             $this->api->respond_error('Not signed in.', 401);
