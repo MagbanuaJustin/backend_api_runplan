@@ -880,7 +880,7 @@ class Auth extends Controller
             'path'     => $this->refresh_cookie_path(),
             'secure'   => $this->is_https(),
             'httponly' => true,
-            'samesite' => 'None',
+            'samesite' => $this->is_https() ? 'None' : 'Lax',
         ]);
     }
 
@@ -891,7 +891,7 @@ class Auth extends Controller
             'path'     => $this->refresh_cookie_path(),
             'secure'   => $this->is_https(),
             'httponly' => true,
-            'samesite' => 'None',
+            'samesite' => $this->is_https() ? 'None' : 'Lax',
         ]);
     }
 }
