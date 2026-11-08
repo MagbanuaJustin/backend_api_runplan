@@ -3,7 +3,7 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Model: SessionModel
- * 
+ *
  * Automatically generated via CLI.
  */
 class SessionModel extends Model
@@ -17,9 +17,9 @@ class SessionModel extends Model
         $row = $this->db
             ->table($this->table . ' s')
             ->select(
-                's.id, s.plan_id, s.scheduled_date, s.planned_start_time, s.type, ' .
-                's.planned_distance_km, s.planned_duration_seconds, ' .
-                's.status, s.skip_reason, s.notes'
+                's.id, s.plan_id, s.scheduled_date, s.planned_start_time, s.type, '
+                . 's.planned_distance_km, s.planned_duration_seconds, '
+                . 's.status, s.skip_reason, s.notes'
             )
             ->join('training_plans p', 'p.id = s.plan_id')
             ->where('s.id', (int) $session_id)
@@ -118,6 +118,23 @@ class SessionModel extends Model
             (int) $session_id,
             (string) $status,
             $skip_reason
+        );
+    }
+
+    /**
+     * Edit the workout details for one session on the active plan.
+     *
+     * @return array [session|null, [http_status, message]|null]
+     */
+    public function edit($user_id, $session_id, array $changes)
+    {
+        $lava = lava_instance();
+        $lava->call->model('PlanModel');
+
+        return $lava->PlanModel->edit_session(
+            (int) $user_id,
+            (int) $session_id,
+            $changes
         );
     }
 }

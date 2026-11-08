@@ -91,11 +91,12 @@ class PlanModel extends Model
     ];
 
     const NOTES = [
-        'easy' => 'Easy, conversational pace.',
-        'long' => 'Long run: steady and relaxed. Walk breaks are fine.',
-        'tempo' => 'Warm up, then a comfortably hard effort for the main part.',
-        'interval' => 'Short fast efforts with easy jogging in between.',
-        'race' => 'Race day. Start easy and enjoy it.',
+        'easy'      => 'Easy, conversational pace.',
+        'long'      => 'Long run: steady and relaxed. Walk breaks are fine.',
+        'tempo'     => 'Warm up, then a comfortably hard effort for the main part.',
+        'threshold' => 'Run at a controlled, comfortably hard threshold effort. Avoid sprinting.',
+        'interval'  => 'Short fast efforts with easy jogging in between.',
+        'race'      => 'Race day. Start easy and enjoy it.',
     ];
 
     // ------------------------------------------------------------------
@@ -660,6 +661,199 @@ class PlanModel extends Model
         return $session ? $this->present_session($session) : null;
     }
 
+    /**
+     * Edit one workout in an active plan without changing its scheduled date.
+     * Returns [session, null] or [null, [http_status, message]].
+     */
+    public function edit_session($user_id, $session_id, array $input)
+    {
+        $user_id = (int) $user_id;
+        $session_id = (int) $session_id;
+
+        $session = $this->db->table('training_sessions')
+            ->select(
+                'id, plan_id, scheduled_date, planned_start_time, type, '
+                . 'planned_distance_km, planned_duration_seconds, status, notes'
+            )
+            ->where('id', $session_id)
+            ->where('user_id', $user_id)
+            ->limit(1)
+            ->get();
+
+        if (!$session) {
+            return [null, [404, 'Session not found.']];
+        }
+
+        $active_plan = $this->db->table($this->table)
+            ->select('id')
+            ->where('id', (int) $session['plan_id'])
+            ->where('user_id', $user_id)
+            ->where('status', 'active')
+            ->limit(1)
+            ->get();
+
+        if (!$active_plan) {
+            return [null, [404, 'Session not found.']];
+        }
+
+        if ($session['status'] === 'completed') {
+            return [null, [409, 'A completed run cannot be edited.']];
+        }
+
+        if ($session['type'] === 'race') {
+            return [null, [409, 'Race-day workouts cannot be edited here.']];
+        }
+
+        $allowed_fields = [
+            'type',
+            'planned_distance_km',
+            'planned_duration_seconds',
+            'planned_start_time',
+            'notes',
+        ];
+
+        $provided_fields = array_values(array_intersect($allowed_fields, array_keys($input)));
+        if (!$provided_fields) {
+            return [null, [422, 'Provide at least one workout field to update.']];
+        }
+
+        $changes = [];
+
+        if (array_key_exists('type', $input)) {
+            $type = is_string($input['type']) ? trim($input['type']) : '';
+            $valid_types = [
+               'easy',
+               'long',
+               'tempo',
+               'threshold',
+               'interval',
+];
+            if (!in_array($type, $valid_types, true)) {
+                return [null, [422, 'Choose a valid workout type.']];
+            }
+            $changes['type'] = $type;
+        }
+
+        if (array_key_exists('planned_distance_km', $input)) {
+            if (!is_numeric($input['planned_distance_km'])) {
+                return [null, [422, 'Distance must be a valid number.']];
+            }
+            $distance = (float) $input['planned_distance_km'];
+            if (!is_finite($distance) || $distance < 0.1 || $distance > 100) {
+                return [null, [422, 'Distance must be between 0.1 and 100 km.']];
+            }
+            $changes['planned_distance_km'] = round($distance, 2);
+        }
+
+        if (array_key_exists('planned_duration_seconds', $input)) {
+            $duration_input = $input['planned_duration_seconds'];
+            if (
+                !is_numeric($duration_input)
+                || (float) $duration_input !== (float) (int) $duration_input
+            ) {
+                return [null, [422, 'Duration must be a whole number of seconds.']];
+            }
+            $duration = (int) $duration_input;
+            if ($duration < 60 || $duration > 86400) {
+                return [null, [422, 'Duration must be between 60 seconds and 24 hours.']];
+            }
+            $changes['planned_duration_seconds'] = $duration;
+        }
+
+        if (array_key_exists('planned_start_time', $input)) {
+            $time = $input['planned_start_time'];
+            if ($time === null || (is_string($time) && trim($time) === '')) {
+                $changes['planned_start_time'] = null;
+            } elseif (is_string($time)) {
+                $time = trim($time);
+                if (preg_match('/^([01]?[0-9]|2[0-3]):([0-5][0-9])$/', $time)) {
+                    $time .= ':00';
+                }
+                $parsed_time = DateTimeImmutable::createFromFormat('!H:i:s', $time);
+                if (!$parsed_time || $parsed_time->format('H:i:s') !== $time) {
+                    return [null, [422, 'Enter a valid start time in HH:MM format.']];
+                }
+                $changes['planned_start_time'] = $time;
+            } else {
+                return [null, [422, 'Start time must be a valid time or empty.']];
+            }
+        }
+
+        if (array_key_exists('notes', $input)) {
+            if ($input['notes'] !== null && !is_scalar($input['notes'])) {
+                return [null, [422, 'Notes must be text.']];
+            }
+            $notes = $input['notes'] === null ? '' : trim((string) $input['notes']);
+            if (mb_strlen($notes) > 1000) {
+                return [null, [422, 'Notes must not exceed 1000 characters.']];
+            }
+            $changes['notes'] = $notes === '' ? null : $notes;
+        }
+
+        $has_change = false;
+        foreach ($changes as $field => $value) {
+            $current = $session[$field] ?? null;
+            if ($field === 'planned_distance_km' && $current !== null) {
+                $current = round((float) $current, 2);
+            } elseif ($field === 'planned_duration_seconds' && $current !== null) {
+                $current = (int) $current;
+            } elseif ($field === 'planned_start_time' && $current !== null) {
+                $current = (string) $current;
+            }
+            if ($current !== $value) {
+                $has_change = true;
+                break;
+            }
+        }
+
+        if (!$has_change) {
+            return [null, [422, 'No changes were made to this workout.']];
+        }
+
+        $changes['updated_at'] = gmdate('Y-m-d H:i:s');
+
+        $this->db->transaction();
+
+        $updated = $this->db->table('training_sessions')
+            ->where('id', $session_id)
+            ->where('user_id', $user_id)
+            ->not_where('status', 'completed')
+            ->update($changes);
+
+        if ((int) $updated !== 1) {
+            $this->db->roll_back();
+            return [null, [409, 'This workout could not be updated. Refresh and try again.']];
+        }
+
+        $summary = 'Edited ' . $session['type'] . ' workout on '
+            . $session['scheduled_date'];
+        if (isset($changes['type']) && $changes['type'] !== $session['type']) {
+            $summary .= ' to ' . $changes['type'];
+        }
+
+        $this->bump_version(
+            $user_id,
+            (int) $session['plan_id'],
+            $summary
+        );
+
+        $this->db->commit();
+
+        $updated_session = $this->db->table('training_sessions')
+            ->select(
+                'id, scheduled_date, planned_start_time, type, planned_distance_km, '
+                . 'planned_duration_seconds, status, skip_reason, notes'
+            )
+            ->where('id', $session_id)
+            ->where('user_id', $user_id)
+            ->limit(1)
+            ->get();
+
+        return $updated_session
+            ? [$this->present_session($updated_session), null]
+            : [null, [404, 'Session not found.']];
+    }
+
     private function present_session(array $session)
     {
         return [
@@ -680,13 +874,12 @@ class PlanModel extends Model
     }
 
     // ---------- revisions ----------
-
     private function current_snapshot($user_id, $plan_id)
     {
         return $this->db->table('training_sessions')
             ->select(
                 'id, scheduled_date, planned_start_time, type, planned_distance_km, '
-                . 'planned_duration_seconds, status, skip_reason'
+                . 'planned_duration_seconds, status, skip_reason, notes'
             )
             ->where('plan_id', (int) $plan_id)
             ->where('user_id', (int) $user_id)
