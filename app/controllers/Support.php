@@ -247,6 +247,72 @@ class Support extends Controller
             $this->api->respond_error('Runner not found.', 404);
         }
 
+        // Keep each plan's scheduled sessions in chronological order.
+        // This makes the earliest session appear first in Runner Details.
+        if (!empty($data['plans']) && is_array($data['plans'])) {
+            foreach ($data['plans'] as &$plan) {
+                if (empty($plan['sessions']) || !is_array($plan['sessions'])) {
+                    continue;
+                }
+
+                usort($plan['sessions'], static function ($a, $b) {
+                    $date_compare = strcmp(
+                        (string) ($a['scheduled_date'] ?? ''),
+                        (string) ($b['scheduled_date'] ?? '')
+                    );
+
+                    if ($date_compare !== 0) {
+                        return $date_compare;
+                    }
+
+                    $time_compare = strcmp(
+                        (string) ($a['planned_start_time'] ?? ''),
+                        (string) ($b['planned_start_time'] ?? '')
+                    );
+
+                    if ($time_compare !== 0) {
+                        return $time_compare;
+                    }
+
+                    return (int) ($a['id'] ?? 0) <=> (int) ($b['id'] ?? 0);
+                });
+            }
+            unset($plan);
+        }
+
+        header('Cache-Control: no-store');
+        $this->api->respond(['data' => $data]);
+    }
+
+    /**
+     * Return performance metrics for a selected runner.
+     * This endpoint is administrator-only; it does not use the admin's
+     * own user ID when calculating the metrics.
+     */
+    public function runner_performance_metrics($id = '')
+    {
+        $this->setup();
+        $this->api->require_method('GET');
+        $this->admin_id();
+
+        if (!ctype_digit((string) $id) || !$this->SupportModel->find_runner((int) $id)) {
+            $this->api->respond_error('Runner not found.', 404);
+        }
+
+        $range = (string) ($_GET['range'] ?? '30d');
+        $allowed_ranges = ['7d', '30d', '90d', 'all'];
+
+        if (!in_array($range, $allowed_ranges, true)) {
+            $this->api->respond_error('Invalid date range.', 400);
+        }
+
+        $this->call->model('PerformanceMetricsModel');
+
+        $data = $this->PerformanceMetricsModel->summary(
+            (int) $id,
+            $range
+        );
+
         header('Cache-Control: no-store');
         $this->api->respond(['data' => $data]);
     }

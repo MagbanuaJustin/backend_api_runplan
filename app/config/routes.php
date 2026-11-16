@@ -58,6 +58,7 @@ $router->get('/api/plans/{id}/revisions', 'Plans::revisions')->middleware('auth'
 
 $router->patch('/api/sessions/{id}', 'Sessions::update')->middleware('auth');
 $router->get('/api/dashboard', 'Dashboard::index')->middleware('auth');
+$router->get('/api/performance-metrics', 'PerformanceMetrics::index')->middleware('auth');
 $router->get('/api/ai/feedback', 'AiCoaching::show')->middleware('auth');
 $router->post('/api/ai/feedback', 'AiCoaching::generate')->middleware('auth');
 $router->post('/api/ai/chat', 'AiCoaching::chat')->middleware('auth');
@@ -86,6 +87,7 @@ $router->patch('/api/support/reports/{id}', 'Support::update_report')->middlewar
 $router->get('/api/support/console', 'Support::console')->middleware('auth');
 $router->get('/api/support/system', 'Support::system')->middleware('auth');
 $router->get('/api/support/users/{id}', 'Support::runner')->middleware('auth');
+$router->get('/api/support/users/{id}/performance-metrics', 'Support::runner_performance_metrics')->middleware('auth');
 $router->patch('/api/support/users/{id}/status', 'Support::update_runner_status')->middleware('auth');
 $router->patch('/api/support/users/{id}/password', 'Support::update_runner_password')->middleware('auth');
 $router->get('/api/support/backups', 'Support::backups')->middleware('auth');

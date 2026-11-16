@@ -84,7 +84,7 @@ class PlanModel extends Model
         'sun' => 7,
     ];
 
-    const TIME_SLOTS = [
+    const LEGACY_TIME_SLOTS = [
         'morning' => '06:30:00',
         'afternoon' => '14:00:00',
         'evening' => '18:30:00',
@@ -195,8 +195,17 @@ class PlanModel extends Model
             }
         }
 
-        $pref_time = $p['preferred_time'] ?? 'morning';
-        $start_time = self::TIME_SLOTS[$pref_time] ?? self::TIME_SLOTS['morning'];
+        $pref_time = (string) ($p['preferred_time'] ?? '06:30:00');
+
+        // Keep compatibility with profiles saved using the old preset values.
+        if (isset(self::LEGACY_TIME_SLOTS[$pref_time])) {
+            $pref_time = self::LEGACY_TIME_SLOTS[$pref_time];
+        }
+
+        // ProfileModel validates the value, but retain a safe generator fallback.
+        $start_time = preg_match('/\\A(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d)?\\z/', $pref_time)
+            ? (strlen($pref_time) === 5 ? $pref_time . ':00' : $pref_time)
+            : '06:30:00';
 
         // Distances and pace.
         $peak_target = self::PEAK_LONG[$goal];

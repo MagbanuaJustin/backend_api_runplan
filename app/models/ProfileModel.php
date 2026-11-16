@@ -13,7 +13,11 @@ class ProfileModel extends Model {
     const EXPERIENCE = ['beginner', 'intermediate', 'advanced'];
     const GOALS      = ['5k', '10k', 'half_marathon', 'marathon', 'general_fitness'];
     const DAYS       = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-    const TIMES      = ['morning', 'afternoon', 'evening'];
+    const LEGACY_TIMES = [
+        'morning' => '06:30:00',
+        'afternoon' => '14:00:00',
+        'evening' => '18:30:00',
+    ];
 
     public function find_for_user($user_id)
     {
@@ -37,11 +41,18 @@ class ProfileModel extends Model {
                 ? (int) $row['desired_sessions_per_week']
                 : null;
 
-        $preferred_time = $row['preferred_time'] ?? null;
-        if (!in_array($preferred_time, self::TIMES, true)) {
-            // Existing profiles may predate the required training-time setting.
-            $preferred_time = 'morning';
+        $preferred_time = (string) ($row['preferred_time'] ?? '');
+
+        // Convert values saved by the previous three-option dropdown.
+        if (isset(self::LEGACY_TIMES[$preferred_time])) {
+            $preferred_time = self::LEGACY_TIMES[$preferred_time];
         }
+
+        // Return the value expected by an HTML time input (HH:MM).
+        if (!preg_match('/\\A(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d)?\\z/', $preferred_time)) {
+            $preferred_time = '06:30:00';
+        }
+        $preferred_time = substr($preferred_time, 0, 5);
 
         return [
             'id'                        => (int) $row['id'],
@@ -183,12 +194,13 @@ class ProfileModel extends Model {
             $clean['desired_sessions_per_week'] = (int) $desired;
         }
 
-        // Training time is required for every saved profile.
-        $time = $in['preferred_time'] ?? null;
-        if (!in_array($time, self::TIMES, true)) {
-            $errors['preferred_time'] = 'Choose morning, afternoon or evening.';
+        // Training time is required and stored as HH:MM:SS.
+        $time = trim((string) ($in['preferred_time'] ?? ''));
+
+        if (!preg_match('/\\A(?:[01]\\d|2[0-3]):[0-5]\\d\\z/', $time)) {
+            $errors['preferred_time'] = 'Choose a valid time in 24-hour format.';
         } else {
-            $clean['preferred_time'] = $time;
+            $clean['preferred_time'] = $time . ':00';
         }
 
         $km   = $in['baseline_distance_km'] ?? null;

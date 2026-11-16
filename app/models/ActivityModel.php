@@ -1,9 +1,10 @@
+
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 /**
  * Model: ActivityModel
- * 
+ *
  * Automatically generated via CLI.
  */
 class ActivityModel extends Model
@@ -20,6 +21,7 @@ class ActivityModel extends Model
         'duration_seconds',
         'effort',
         'notes',
+        'workout_type',
     ];
 
     /**
@@ -75,15 +77,20 @@ class ActivityModel extends Model
         $row['id'] = (int) $row['id'];
         $row['distance_km'] = $km;
         $row['duration_seconds'] = $seconds;
+
         $row['session_id'] = $row['session_id'] !== null
             ? (int) $row['session_id']
             : null;
+
         $row['effort'] = $row['effort'] !== null
             ? (int) $row['effort']
             : null;
 
+        $row['workout_type'] = $row['workout_type'] ?? null;
+
         if ($km > 0 && $seconds > 0) {
             $pace = (int) round($seconds / $km);
+
             $row['pace_seconds_per_km'] = $pace;
             $row['pace_label'] = sprintf(
                 '%d:%02d',
@@ -108,6 +115,7 @@ class ActivityModel extends Model
         $clean = [];
         $errors = [];
 
+        // Validate activity date.
         $date = (string) ($input['activity_date'] ?? '');
         $parsedDate = DateTime::createFromFormat('Y-m-d', $date);
 
@@ -128,6 +136,7 @@ class ActivityModel extends Model
             }
         }
 
+        // Validate distance.
         $distance = $input['distance_km'] ?? null;
 
         if (
@@ -140,6 +149,7 @@ class ActivityModel extends Model
             $clean['distance_km'] = round((float) $distance, 2);
         }
 
+        // Validate duration.
         $duration = $input['duration_seconds'] ?? null;
 
         if (
@@ -170,6 +180,7 @@ class ActivityModel extends Model
             }
         }
 
+        // Validate effort.
         $effort = $input['effort'] ?? null;
 
         if ($effort === null || $effort === '') {
@@ -186,6 +197,7 @@ class ActivityModel extends Model
             $clean['effort'] = (int) $effort;
         }
 
+        // Validate notes.
         $notes = $input['notes'] ?? null;
 
         if ($notes === null || trim((string) $notes) === '') {
@@ -194,6 +206,30 @@ class ActivityModel extends Model
             $errors['notes'] = 'Notes can be at most 1000 characters.';
         } else {
             $clean['notes'] = trim((string) $notes);
+        }
+
+        // Validate workout type.
+        $workoutType = $input['workout_type'] ?? null;
+
+        $allowedWorkoutTypes = [
+            'easy',
+            'long',
+            'tempo',
+            'threshold',
+            'interval',
+            'recovery',
+            'race',
+        ];
+
+        if ($workoutType === null || $workoutType === '') {
+            $clean['workout_type'] = null;
+        } elseif (
+            !is_string($workoutType)
+            || !in_array($workoutType, $allowedWorkoutTypes, true)
+        ) {
+            $errors['workout_type'] = 'Select a valid workout type.';
+        } else {
+            $clean['workout_type'] = $workoutType;
         }
 
         return [$clean, $errors];
@@ -372,6 +408,7 @@ class ActivityModel extends Model
                 'duration_seconds' => $clean['duration_seconds'],
                 'effort' => $clean['effort'],
                 'notes' => $clean['notes'],
+                'workout_type' => $clean['workout_type'] ?? null,
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
     }
