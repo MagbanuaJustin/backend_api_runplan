@@ -22,6 +22,7 @@ class ActivityModel extends Model
         'effort',
         'notes',
         'workout_type',
+        'route_data',
     ];
 
     /**
@@ -87,6 +88,15 @@ class ActivityModel extends Model
             : null;
 
         $row['workout_type'] = $row['workout_type'] ?? null;
+
+        if (!empty($row['route_data']) && is_string($row['route_data'])) {
+            $decodedRoute = json_decode($row['route_data'], true);
+            $row['route_data'] = (json_last_error() === JSON_ERROR_NONE && is_array($decodedRoute))
+                ? $decodedRoute
+                : null;
+        } else {
+            $row['route_data'] = null;
+        }
 
         if ($km > 0 && $seconds > 0) {
             $pace = (int) round($seconds / $km);
@@ -230,6 +240,98 @@ class ActivityModel extends Model
             $errors['workout_type'] = 'Select a valid workout type.';
         } else {
             $clean['workout_type'] = $workoutType;
+        }
+
+        // Validate and encode optional GPS route data.
+        $routeData = $input['route_data'] ?? null;
+
+        if ($routeData === null || $routeData === '') {
+            $clean['route_data'] = null;
+        } elseif (
+            !is_array($routeData)
+            || !isset($routeData['segments'])
+            || !is_array($routeData['segments'])
+        ) {
+            $errors['route_data'] = 'The GPS route data is invalid.';
+        } else {
+            $cleanSegments = [];
+            $pointCount = 0;
+            $routeIsValid = true;
+
+            foreach ($routeData['segments'] as $segment) {
+                if (!is_array($segment)) {
+                    $routeIsValid = false;
+                    break;
+                }
+
+                $cleanSegment = [];
+
+                foreach ($segment as $point) {
+                    $pointCount++;
+
+                    if (
+                        !is_array($point)
+                        || !isset($point['latitude'], $point['longitude'])
+                        || !is_numeric($point['latitude'])
+                        || !is_numeric($point['longitude'])
+                    ) {
+                        $routeIsValid = false;
+                        break 2;
+                    }
+
+                    $latitude = (float) $point['latitude'];
+                    $longitude = (float) $point['longitude'];
+
+                    if (
+                        $latitude < -90 || $latitude > 90
+                        || $longitude < -180 || $longitude > 180
+                    ) {
+                        $routeIsValid = false;
+                        break 2;
+                    }
+
+                    $cleanPoint = [
+                        'latitude' => $latitude,
+                        'longitude' => $longitude,
+                    ];
+
+                    if (isset($point['timestamp']) && is_numeric($point['timestamp'])) {
+                        $cleanPoint['timestamp'] = (int) $point['timestamp'];
+                    }
+
+                    if (
+                        array_key_exists('accuracy', $point)
+                        && $point['accuracy'] !== null
+                        && is_numeric($point['accuracy'])
+                        && (float) $point['accuracy'] >= 0
+                    ) {
+                        $cleanPoint['accuracy'] = (float) $point['accuracy'];
+                    } else {
+                        $cleanPoint['accuracy'] = null;
+                    }
+
+                    $cleanSegment[] = $cleanPoint;
+                }
+
+                if ($cleanSegment) {
+                    $cleanSegments[] = $cleanSegment;
+                }
+            }
+
+            if (!$routeIsValid || $pointCount > 15000) {
+                $errors['route_data'] = 'The GPS route contains invalid data or too many points.';
+            } else {
+                $encodedRoute = json_encode(
+                    ['segments' => $cleanSegments],
+                    JSON_UNESCAPED_SLASHES
+                );
+
+                if ($encodedRoute === false) {
+                    $errors['route_data'] = 'The GPS route could not be processed.';
+                } else {
+                    $clean['route_data'] = $encodedRoute;
+                }
+            }
         }
 
         return [$clean, $errors];
