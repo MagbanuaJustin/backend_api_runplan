@@ -1,3 +1,4 @@
+
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 /**
@@ -43,19 +44,37 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 | EXPLANATION OF VARIABLES
 | -------------------------------------------------------------------
 |
-|	['driver'] 		The driver of your database server.
-|	['hostname'] 	The hostname of your database server.
-|	['port'] 		The port used by your database server.
-|	['username'] 	The username used to connect to the database
-|	['password'] 	The password used to connect to the database
-|	['database'] 	The name of the database you want to connect to
-|	['charset']		The default character set
-|   ['dbprefix']    You can add an optional prefix, which will be added
-|				    to the table name when using the  Query Builder class
-|   You can create new instance of the database by adding new element of
-|   $database variable.
-|   Example: $database['another_example'] = array('key' => 'value')
+| ['driver']       The driver of your database server.
+| ['hostname']     The hostname of your database server.
+| ['port']         The port used by your database server.
+| ['username']     The username used to connect to the database
+| ['password']     The password used to connect to the database
+| ['database']     The name of the database you want to connect to
+| ['charset']      The default character set
+| ['dbprefix']     You can add an optional prefix, which will be added
+|                  to the table name when using the Query Builder class
+| You can create new instance of the database by adding new element of
+| $database variable.
+| Example: $database['another_example'] = array('key' => 'value')
 */
+
+/*
+ * Resolve the SSL CA certificate path.
+ * Supports both local relative paths and absolute paths
+ * such as Render Secret Files.
+ */
+$db_ssl_ca = env('DB_SSL_CA', '');
+
+if (!empty($db_ssl_ca)) {
+    $is_absolute_path = (
+        $db_ssl_ca[0] === '/' ||
+        preg_match('/^[A-Za-z]:[\/\\\\]/', $db_ssl_ca)
+    );
+
+    if (!$is_absolute_path) {
+        $db_ssl_ca = ROOT_DIR . $db_ssl_ca;
+    }
+}
 
 $database['main'] = array(
     'driver'    => env('DB_DRIVER', 'mysql'),
@@ -65,7 +84,7 @@ $database['main'] = array(
     'password'  => env('DB_PASS', ''),
     'database'  => env('DB_NAME', 'runplandb'),
     'charset'   => 'utf8mb4',
-    'ssl_ca'    => env('DB_SSL_CA') ? ROOT_DIR . env('DB_SSL_CA') : '',
+    'ssl_ca'    => $db_ssl_ca,
     'dbprefix'  => '',
     'path'      => ''
 );
